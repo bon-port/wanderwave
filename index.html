@@ -1464,6 +1464,8 @@
   }
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.2/feather.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
+<script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body>
 
@@ -1843,6 +1845,11 @@
           </div>
         </div>
 
+        <div class="field" id="p-captcha-field" style="display:none;">
+          <label>認証</label>
+          <div id="turnstile-widget"></div>
+        </div>
+
         <div class="form-actions">
           <button class="primary-btn" id="profile-submit-btn" onclick="submitProfile()">登録する</button>
         </div>
@@ -1892,11 +1899,75 @@
 
       <div class="post-block-label" style="margin-top:16px;">書いたレビュー</div>
       <div id="history-reviews"></div>
+
+      <div class="pocket-divider"></div>
+
+      <div class="section-label-row">
+        <div class="section-label">視聴ログ</div>
+        <button class="link-btn" onclick="goMyLogForm()">+ ログを書く</button>
+      </div>
+      <div class="sub" style="margin-bottom:14px;">観た映画の記録。あなただけが見られます</div>
+      <div id="mylog-list"></div>
     </div>
 
     <div class="profile-links">
       <button class="link-btn" onclick="goTerms()">利用規約・プライバシーポリシー</button>
       <button class="link-btn" onclick="goContact()">お問い合わせ</button>
+    </div>
+  </div>
+
+  <!-- ============ MY LOG (movie_logs) FORM VIEW ============ -->
+  <div class="view" id="view-mylog-form">
+    <button class="back-btn" onclick="goProfile()">← プロフィールに戻る</button>
+    <div class="detail-head">
+      <h2 id="mylog-heading">視聴ログを書く</h2>
+      <div class="sub">観た映画の記録。あなただけが見られます</div>
+    </div>
+
+    <div class="form-grid">
+      <div class="field">
+        <label>映画のタイトル</label>
+        <input class="field-input" id="ml-title" placeholder="映画のタイトル">
+      </div>
+
+      <div class="field">
+        <label>愛度</label>
+        <div class="vote-widget">
+          <div class="heart-single-wrap">
+            <button type="button" class="heart-single-btn" id="ml-heart-btn" onclick="cycleMlLove()">
+              <svg class="heart-icon" viewBox="0 0 32 30" fill="currentColor"><path d="M16 27 C6 20 2 13 2 8.5 C2 4 5.5 1 9.5 1 C12.5 1 15 2.8 16 5.5 C17 2.8 19.5 1 22.5 1 C26.5 1 30 4 30 8.5 C30 13 26 20 16 27 Z"/></svg>
+            </button>
+            <div class="heart-level-dots" id="ml-heart-dots">
+              <span class="h-dot"></span><span class="h-dot"></span><span class="h-dot"></span>
+            </div>
+            <div class="heart-hint" id="ml-heart-hint">タップで育つ</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>感情タグ(3つまで選択) <span id="ml-tag-count">0/3</span></label>
+        <div class="tag-select" id="ml-tag-select"></div>
+      </div>
+
+      <div class="field">
+        <label>刺激の強さ: <span id="ml-intensity-live-label">やや強い(50%)</span></label>
+        <input type="range" id="ml-intensity-slider" class="risk-slider" min="0" max="100" value="50" oninput="onMlIntensityInput(this.value)">
+        <div class="reason-reveal" id="ml-reason-reveal" style="display:none; margin-top:10px;">
+          <div class="post-block-label">当てはまるものは?(任意・複数選択可)</div>
+          <div class="tag-select" id="ml-reason-select"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>ひとこと感想(任意・200字まで)</label>
+        <textarea id="ml-review" maxlength="200" rows="3" placeholder="例: 泣けるけど元気が出る話でした"></textarea>
+      </div>
+
+      <div class="form-actions">
+        <button class="primary-btn" id="mylog-submit-btn" onclick="saveMyLog()">記録する</button>
+        <button class="ghost-btn" id="mylog-delete-btn" onclick="deleteMyLogConfirm()" style="display:none;">この記録を削除</button>
+      </div>
     </div>
   </div>
 
@@ -2066,6 +2137,115 @@
 </div>
 
 <script>
+// --- Supabase接続 -----------------------------------------------------
+// profiles(プロフィール)とmovie_logs(視聴ログ)はSupabaseに保存する。
+// アカウント登録はメール/パスワード不要の匿名サインインを使う(既存のオンボーディング文言と一致させるため)。
+const supabase = window.supabase.createClient(
+  'https://wjhvifdbttlijxnreaha.supabase.co',
+  'sb_publishable_9yJcvQEtI0VsI_b_vQBNtg_s9bPfDf9'
+);
+
+// 匿名サインインにはTurnstile(CAPTCHA)のトークンが必要なため、
+// ページ読み込み時には「既存セッションがあるか」だけを確認し、
+// 実際のsignInAnonymously()はプロフィール登録フォームの送信時(CAPTCHA通過後)に行う。
+const TURNSTILE_SITE_KEY = '0x4AAAAAAEyRzv6vqgd53c5F';
+let hasSupabaseSession = false;
+let turnstileWidgetId = null;
+let turnstileToken = null;
+
+async function checkExistingSession(){
+  try{
+    const { data: { session } } = await supabase.auth.getSession();
+    hasSupabaseSession = !!session;
+  }catch(err){
+    console.error('セッション確認に失敗しました', err);
+    hasSupabaseSession = false;
+  }
+  return hasSupabaseSession;
+}
+
+async function currentUserId(){
+  const { data: { user } } = await supabase.auth.getUser();
+  return user ? user.id : null;
+}
+
+// プロフィール登録フォームが表示されるたびに呼ぶ。
+// 既にセッションがある(=登録済み/編集時)場合はウィジェット自体を出さない。
+function setupTurnstileForProfileForm(){
+  const field = document.getElementById('p-captcha-field');
+  if(!field) return;
+
+  if(hasSupabaseSession){
+    field.style.display = 'none';
+    return;
+  }
+
+  field.style.display = 'block';
+  renderTurnstile();
+}
+
+function renderTurnstile(retriesLeft){
+  if(retriesLeft === undefined) retriesLeft = 25; // 約5秒(200ms x 25)まで読み込みを待つ
+  turnstileToken = null;
+
+  if(typeof turnstile === 'undefined'){
+    if(retriesLeft <= 0){
+      console.error('Turnstileの読み込みに失敗しました');
+      showToast('CAPTCHAの読み込みに失敗しました。通信環境を確認して再度お試しください');
+      return;
+    }
+    setTimeout(() => renderTurnstile(retriesLeft - 1), 200);
+    return;
+  }
+
+  const container = document.getElementById('turnstile-widget');
+  if(!container) return;
+
+  if(turnstileWidgetId !== null){
+    turnstile.reset(turnstileWidgetId);
+    return;
+  }
+
+  turnstileWidgetId = turnstile.render(container, {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: (token) => { turnstileToken = token; },
+    'expired-callback': () => { turnstileToken = null; },
+    'error-callback': () => { turnstileToken = null; }
+  });
+}
+
+// CAPTCHAトークンを添えて匿名サインインする。既にセッションがあれば何もしない。
+// 戻り値: サインイン(または既存セッションの利用)に成功したらtrue
+async function signInAnonymouslyWithCaptcha(){
+  if(hasSupabaseSession) return true;
+
+  if(!turnstileToken){
+    showToast('CAPTCHA認証を完了してください');
+    return false;
+  }
+
+  try{
+    const { error } = await supabase.auth.signInAnonymously({
+      options: { captchaToken: turnstileToken }
+    });
+    if(error){
+      console.error('匿名サインインに失敗しました', error);
+      showToast('認証に失敗しました。もう一度お試しください');
+      return false;
+    }
+    hasSupabaseSession = true;
+    return true;
+  }catch(err){
+    console.error('認証中にエラーが発生しました', err);
+    showToast('認証に失敗しました。通信環境を確認してください');
+    return false;
+  }finally{
+    // トークンは1回使い切りのため、成否にかかわらずウィジェットをリセットする
+    if(turnstileWidgetId !== null) turnstile.reset(turnstileWidgetId);
+    turnstileToken = null;
+  }
+}
+
 const ALL_TAGS = ["楽しい","感動","リラックス","ワクワク","怖い","美しい","ドキドキ","笑い","悲しい","考えさせられる"];
 
 const TAG_COLORS = {
@@ -11124,7 +11304,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, mySubmittedMovieIds: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, pocketDiagnosis: null };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, pocketDiagnosis: null };
 
 
 function riskLabel(v){
@@ -12397,15 +12577,73 @@ const AVATAR_COLORS = ['#a084f2', '#e2647f', '#b98aa6', '#4f9d89', '#d9836a'];
 let pendingAvatarColor = AVATAR_COLORS[0];
 let pendingAvatarPhoto = null;
 
+// プロフィールはSupabaseの profiles テーブルに保存する。
+// ニックネーム登録が済んでいるかどうか(=オンボーディング完了フラグ)だけは
+// DBに列がないため、この端末のlocalStorageで覚えておく。
+const ONBOARDED_KEY = 'wander-onboarded';
+const AVATAR_CROP_KEY = 'wander-avatar-crop';
+
 async function saveProfile(){
-  try{ await window.storage.set('filmo-profile', JSON.stringify(state.profile), false); }
-  catch(err){ console.error(err); }
+  try{
+    const userId = await currentUserId();
+    if(!userId) throw new Error('未認証です');
+
+    const { error } = await supabase
+      .from('profiles')
+      .update({
+        user_name: state.profile.nickname,
+        avatar_color: state.profile.avatarPhoto ? null : state.profile.avatarColor,
+        avatar_photo_url: state.profile.avatarPhoto || null
+      })
+      .eq('id', userId);
+    if(error) throw error;
+
+    localStorage.setItem(ONBOARDED_KEY, 'true');
+    localStorage.setItem(AVATAR_CROP_KEY, JSON.stringify({
+      x: state.profile.avatarPhotoPosX,
+      y: state.profile.avatarPhotoPosY
+    }));
+  }catch(err){
+    console.error(err);
+    showToast('プロフィールの保存に失敗しました。通信環境を確認してください。');
+  }
 }
+
 async function loadProfile(){
   try{
-    const result = await window.storage.get('filmo-profile', false);
-    state.profile = JSON.parse(result.value);
-  }catch(err){ state.profile = null; }
+    const userId = await currentUserId();
+    if(!userId){ state.profile = null; return; }
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('user_name, avatar_color, avatar_photo_url')
+      .eq('id', userId)
+      .single();
+    if(error) throw error;
+
+    if(localStorage.getItem(ONBOARDED_KEY) !== 'true'){
+      // まだこの端末で登録を完了していない(トリガーが作った仮のプロフィールのみの状態)
+      state.profile = null;
+      return;
+    }
+
+    let crop = { x: 50, y: 50 };
+    try{
+      const saved = JSON.parse(localStorage.getItem(AVATAR_CROP_KEY));
+      if(saved) crop = saved;
+    }catch(e){ /* 位置情報がなければ中央寄せのまま */ }
+
+    state.profile = {
+      nickname: data.user_name,
+      avatarColor: data.avatar_color || AVATAR_COLORS[0],
+      avatarPhoto: data.avatar_photo_url || null,
+      avatarPhotoPosX: crop.x,
+      avatarPhotoPosY: crop.y
+    };
+  }catch(err){
+    console.error(err);
+    state.profile = null;
+  }
 }
 
 async function saveMySubmissionCount(){
@@ -12690,12 +12928,14 @@ function goProfile(){
 
     renderPocketView();
     renderHistory();
+    renderMyLogList();
   } else {
     summaryEl.style.display = 'none';
     editFormEl.style.display = 'block';
     pocketSectionEl.style.display = 'none';
   }
 
+  setupTurnstileForProfileForm();
   switchView('view-profile');
 }
 
@@ -12704,18 +12944,213 @@ function toggleProfileEditForm(){
   document.getElementById('profile-edit-form').style.display = profileEditOpen ? 'block' : 'none';
 }
 
-function submitProfile(){
+async function submitProfile(){
   const nickname = document.getElementById('p-nickname').value.trim();
   if(!nickname){ showToast('ニックネームを入力してください'); return; }
+
   const isFirstRegistration = !state.profile;
+
+  // 初回登録(=まだセッションがない)場合は、CAPTCHA通過後に匿名サインインする
+  if(!hasSupabaseSession){
+    const ok = await signInAnonymouslyWithCaptcha();
+    if(!ok) return;
+  }
+
   state.profile = { nickname, avatarColor: pendingAvatarColor, avatarPhoto: pendingAvatarPhoto, avatarPhotoPosX: pendingAvatarPosX, avatarPhotoPosY: pendingAvatarPosY };
-  saveProfile();
+  await saveProfile();
   updateHeader();
   showToast(isFirstRegistration ? '登録しました' : 'プロフィールを保存しました');
   if(isFirstRegistration){
     goHome();
   } else {
     goProfile(); // 保存後は要約表示に戻る
+  }
+}
+
+// --- 視聴ログ(Supabase movie_logsテーブル) ------------------------------
+// カタログ映画への「レビュー投稿」とは別物の、個人の視聴記録機能。
+// タイトルは自由入力で、他のユーザーには公開されない(RLSで本人のみ読み書き可)。
+let mlEditingId = null;
+let mlLoveLevel = 0;
+let mlSelectedTags = new Set();
+let mlSelectedReasons = new Set();
+
+async function loadMyLogs(){
+  try{
+    const userId = await currentUserId();
+    if(!userId){ state.myLogs = []; return; }
+    const { data, error } = await supabase
+      .from('movie_logs')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if(error) throw error;
+    state.myLogs = data || [];
+  }catch(err){
+    console.error(err);
+    state.myLogs = [];
+  }
+}
+
+function renderMyLogList(){
+  const root = document.getElementById('mylog-list');
+  if(!root) return;
+  if(!state.myLogs.length){
+    root.innerHTML = '<div class="empty" style="padding:16px 0;">まだ視聴ログがありません。</div>';
+    return;
+  }
+  root.innerHTML = state.myLogs.map(log => {
+    const firstTag = (log.tags || '').split(',').filter(Boolean)[0];
+    return `
+      <div class="history-item" onclick="goMyLogForm(${log.id})">
+        <div class="h-poster" style="background:${firstTag ? tagColor(firstTag) : '#3a3a40'}">${(log.movie_title || '?').charAt(0)}</div>
+        <div>
+          <div class="h-title">${log.movie_title}</div>
+          <div class="h-sub">${log.review_text || log.tags || '感想なし'}</div>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function goMyLogForm(logId){
+  const log = logId != null ? state.myLogs.find(l => l.id === logId) : null;
+  mlEditingId = log ? log.id : null;
+  mlLoveLevel = log ? (log.love_level || 0) : 0;
+  mlSelectedTags = new Set(log && log.tags ? log.tags.split(',').filter(Boolean) : []);
+  mlSelectedReasons = new Set(log && log.reason_tags ? log.reason_tags : []);
+
+  document.getElementById('mylog-heading').textContent = log ? '視聴ログを編集' : '視聴ログを書く';
+  document.getElementById('ml-title').value = log ? log.movie_title : '';
+  document.getElementById('ml-review').value = log ? (log.review_text || '') : '';
+  document.getElementById('ml-intensity-slider').value = log ? (log.expression_level != null ? log.expression_level : 50) : 50;
+  document.getElementById('mylog-submit-btn').textContent = log ? '更新する' : '記録する';
+  document.getElementById('mylog-delete-btn').style.display = log ? 'inline-block' : 'none';
+
+  onMlIntensityInput(document.getElementById('ml-intensity-slider').value);
+  renderMlHeart();
+  renderMlTagSelect();
+  renderMlReasonSelect();
+
+  switchView('view-mylog-form');
+}
+
+function renderMlHeart(){
+  const btn = document.getElementById('ml-heart-btn');
+  btn.classList.remove('lv1', 'lv2', 'lv3');
+  if(mlLoveLevel > 0) btn.classList.add('lv' + mlLoveLevel);
+  document.querySelectorAll('#ml-heart-dots .h-dot').forEach((dot, i) => {
+    dot.classList.toggle('filled', i < mlLoveLevel);
+  });
+  document.getElementById('ml-heart-hint').style.display = mlLoveLevel > 0 ? 'none' : 'block';
+}
+
+function cycleMlLove(){
+  mlLoveLevel = (mlLoveLevel + 1) % 4;
+  renderMlHeart();
+}
+
+function renderMlTagSelect(){
+  const el = document.getElementById('ml-tag-select');
+  el.innerHTML = ALL_TAGS.map(tag => {
+    const isSelected = mlSelectedTags.has(tag);
+    const isDisabled = !isSelected && mlSelectedTags.size >= 3;
+    const color = tagColor(tag);
+    return `<div class="tagchip${isSelected ? ' active' : ''}${isDisabled ? ' disabled' : ''}" style="${isSelected ? `background:${color};border-color:${color};color:#0c0c0e;` : ''}" onclick="toggleMlTag('${tag}')"><span class="tag-dot" style="background:${color}"></span>${tag}</div>`;
+  }).join('');
+  document.getElementById('ml-tag-count').textContent = `${mlSelectedTags.size}/3`;
+}
+
+function toggleMlTag(tag){
+  if(mlSelectedTags.has(tag)) mlSelectedTags.delete(tag);
+  else if(mlSelectedTags.size < 3) mlSelectedTags.add(tag);
+  renderMlTagSelect();
+}
+
+function renderMlReasonSelect(){
+  const el = document.getElementById('ml-reason-select');
+  el.innerHTML = Object.keys(REASON_INFO).map(key => {
+    const info = REASON_INFO[key];
+    const isSelected = mlSelectedReasons.has(key);
+    return `<div class="tagchip${isSelected ? ' active' : ''}" onclick="toggleMlReason('${key}')">${info.label}</div>`;
+  }).join('');
+}
+
+function toggleMlReason(key){
+  if(mlSelectedReasons.has(key)) mlSelectedReasons.delete(key);
+  else mlSelectedReasons.add(key);
+  renderMlReasonSelect();
+}
+
+function onMlIntensityInput(value){
+  const color = riskCategoryColor(value);
+  const label = document.getElementById('ml-intensity-live-label');
+  label.textContent = `${riskLabel(value)}(${value}%)`;
+  label.style.color = color;
+  document.getElementById('ml-intensity-slider').style.accentColor = color;
+  document.getElementById('ml-reason-reveal').style.display = value > 25 ? 'block' : 'none';
+}
+
+async function saveMyLog(){
+  if(!state.profile){
+    showToast('視聴ログを書くには、まずニックネームを登録してください');
+    goOnboarding();
+    return;
+  }
+
+  const title = document.getElementById('ml-title').value.trim();
+  if(!title){ showToast('映画のタイトルを入力してください'); return; }
+
+  const reviewText = document.getElementById('ml-review').value.trim();
+  if(reviewText.length > 200){ showToast('感想は200字までです'); return; }
+
+  const userId = await currentUserId();
+  if(!userId){ showToast('通信環境を確認してください'); return; }
+
+  const payload = {
+    movie_title: title,
+    tags: [...mlSelectedTags].join(','),
+    expression_level: parseInt(document.getElementById('ml-intensity-slider').value, 10),
+    love_level: mlLoveLevel,
+    review_text: reviewText || null,
+    reason_tags: [...mlSelectedReasons],
+    user_id: userId
+  };
+
+  try{
+    if(mlEditingId != null){
+      const { error } = await supabase.from('movie_logs').update(payload).eq('id', mlEditingId).eq('user_id', userId);
+      if(error) throw error;
+      showToast('視聴ログを更新しました');
+    } else {
+      const { error } = await supabase.from('movie_logs').insert(payload);
+      if(error) throw error;
+      showToast(`視聴ログを記録しました。${randomThanks()}`);
+      feedbackSuccess();
+    }
+    await loadMyLogs();
+    renderMyLogList();
+    goProfile();
+  }catch(err){
+    console.error(err);
+    showToast('保存に失敗しました。通信環境を確認してください。');
+  }
+}
+
+async function deleteMyLogConfirm(){
+  if(mlEditingId == null) return;
+  const userId = await currentUserId();
+  if(!userId) return;
+  try{
+    const { error } = await supabase.from('movie_logs').delete().eq('id', mlEditingId).eq('user_id', userId);
+    if(error) throw error;
+    showToast('視聴ログを削除しました');
+    await loadMyLogs();
+    renderMyLogList();
+    goProfile();
+  }catch(err){
+    console.error(err);
+    showToast('削除に失敗しました。通信環境を確認してください。');
   }
 }
 
@@ -13543,7 +13978,8 @@ function submitContact(){
 
 async function init(){
   document.getElementById('results').innerHTML = '<div class="empty">読み込み中...</div>';
-  await Promise.all([loadMovies(), loadMyLove(), loadMyIntensity(), loadMyReason(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadMyReviewed(), loadProfile(), loadMySubmissionCount(), loadLastSubmissionDate(), loadPocketDiagnosis(), loadDiagnosisHistory()]);
+  await checkExistingSession(); // 既存セッションの有無だけ確認。匿名サインインはプロフィール登録フォームでCAPTCHA通過後に行う
+  await Promise.all([loadMovies(), loadMyLove(), loadMyIntensity(), loadMyReason(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadMyReviewed(), loadProfile(), loadMyLogs(), loadMySubmissionCount(), loadLastSubmissionDate(), loadPocketDiagnosis(), loadDiagnosisHistory()]);
 
   renderTagCloud();
   renderResults();
