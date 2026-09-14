@@ -1733,6 +1733,11 @@
         タイトルと公開年が既存の作品と重複していないか自動でチェックされます。今の段階では投稿するとすぐ一覧に公開されます(管理者による承認フローは、まだこのバージョンには入っていません)。1日に追加できる映画は5件までです。
       </div>
 
+      <div class="field">
+        <label>認証</label>
+        <div id="add-movie-turnstile-widget"></div>
+      </div>
+
       <div class="form-actions">
         <button class="primary-btn" onclick="submitMovie()">審査に送信する</button>
       </div>
@@ -2291,6 +2296,39 @@ function renderReviewTurnstile(retriesLeft){
     callback: (token) => { reviewTurnstileToken = token; },
     'expired-callback': () => { reviewTurnstileToken = null; },
     'error-callback': () => { reviewTurnstileToken = null; }
+  });
+}
+
+// 映画追加フォーム用のTurnstileウィジェット。goAdd()で画面を開くたびに呼ぶ。
+let addMovieTurnstileWidgetId = null;
+let addMovieTurnstileToken = null;
+
+function renderAddMovieTurnstile(retriesLeft){
+  if(retriesLeft === undefined) retriesLeft = 25;
+  addMovieTurnstileToken = null;
+
+  if(typeof turnstile === 'undefined'){
+    if(retriesLeft <= 0){
+      console.error('Turnstileの読み込みに失敗しました');
+      return;
+    }
+    setTimeout(() => renderAddMovieTurnstile(retriesLeft - 1), 200);
+    return;
+  }
+
+  const container = document.getElementById('add-movie-turnstile-widget');
+  if(!container) return;
+
+  if(addMovieTurnstileWidgetId !== null){
+    turnstile.reset(addMovieTurnstileWidgetId);
+    return;
+  }
+
+  addMovieTurnstileWidgetId = turnstile.render(container, {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: (token) => { addMovieTurnstileToken = token; },
+    'expired-callback': () => { addMovieTurnstileToken = null; },
+    'error-callback': () => { addMovieTurnstileToken = null; }
   });
 }
 
@@ -3647,6 +3685,7 @@ function goAdd(){
   renderFormTags();
   renderFormPlatforms();
   switchView('view-add');
+  renderAddMovieTurnstile();
 }
 
 function syncSlider(id, valId){
@@ -3746,14 +3785,32 @@ async function submitMovie(){
   const duplicate = MOVIES.some(m => m.title === escapeHtml(title) && m.year === year);
   if(duplicate){ showToast('同じタイトル・公開年の映画が既に登録されています'); return; }
 
+  if(!addMovieTurnstileToken){
+    showToast('CAPTCHA認証を完了してください');
+    return;
+  }
+
   try{
-    const userId = await currentUserId();
-    const { data, error } = await supabase
-      .from('movies')
-      .insert({ title, release_year: year, emotion_tags: [...selectedFormTags], added_by: userId })
-      .select('id')
-      .single();
-    if(error) throw error;
+    // submit-movie エッジ関数を経由させ、Turnstileトークン検証を通過した場合だけ
+    // 書き込む。関数内では呼び出しユーザー自身のJWTで書き込むため、RLS
+    // (added_by=auth.uid()の所有チェック・投稿レート制限)はそのまま有効。
+    const { data: { session } } = await supabase.auth.getSession();
+    const { data, error } = await supabase.functions.invoke('submit-movie', {
+      body: {
+        title,
+        release_year: year,
+        emotion_tags: [...selectedFormTags],
+        review_text: reviewText || undefined,
+        captcha_token: addMovieTurnstileToken
+      },
+      headers: session ? { Authorization: `Bearer ${session.access_token}` } : undefined
+    });
+    if(error){
+      let serverMessage = null;
+      try{ serverMessage = (await error.context.json()).error; }catch(e){ /* 本文が読めなければ諦める */ }
+      throw Object.assign(new Error(serverMessage || error.message), { code: 'P0001' });
+    }
+    if(data && data.error) throw Object.assign(new Error(data.error), { code: 'P0001' });
 
     const newId = data.id;
     const newMovie = {
@@ -3770,7 +3827,6 @@ async function submitMovie(){
     MOVIES.push(newMovie);
 
     if(reviewText){
-      await upsertMyReview(newId, { review_text: reviewText });
       state.hasReviewed[newId] = true;
       state.myReviewsById[newId] = reviewText;
       await loadProfile();
@@ -3787,6 +3843,9 @@ async function submitMovie(){
   }catch(err){
     console.error('映画の追加に失敗しました', err);
     showToast(friendlyErrorMessage(err, '追加に失敗しました。通信環境を確認してください。'));
+  }finally{
+    if(addMovieTurnstileWidgetId !== null) turnstile.reset(addMovieTurnstileWidgetId);
+    addMovieTurnstileToken = null;
   }
 }
 
