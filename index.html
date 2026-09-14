@@ -296,7 +296,7 @@
     from{ opacity: 0; transform: translateY(8px); }
     to{ opacity: 1; transform: translateY(0); }
   }
-  .result-card, .review-card, .history-item{
+  .result-card, .review-card, .history-item, .list-card, .diagnosis-history-card, .diagnosis-picker-item{
     animation: cardFadeIn 0.4s ease-out both;
   }
 
@@ -2738,31 +2738,16 @@ function clearSearch(){
   renderResults();
 }
 
+// カードのHTMLはbuildCardHTML()の1箇所だけで作る。以前はここで
+// document.createElement()を使ってほぼ同じマークアップを別途組み立てて
+// おり、片方だけ直すともう片方が古いままになる(実際にそうなっていた)
+// 構造的な原因になっていたため、テンプレートを一本化した。
 function renderMovieCards(root, list, emptyMessage){
-  root.innerHTML = "";
-
   if(list.length === 0){
     root.innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
-
-  list.forEach(m => {
-    const card = document.createElement('div');
-    card.className = 'result-card';
-    card.onclick = () => goDetail(m.id);
-    const avg = loveDisplayValue(m);
-    card.innerHTML = `
-      <div class="poster-thumb" style="background:${m.posterColor}">${m.title.charAt(0)}</div>
-      <div class="result-title">${m.title}</div>
-      <div class="result-year">${m.year}</div>
-      <div class="interest-row">
-        <div class="interest-bar-track"><div class="interest-bar-fill" style="width:${(avg/5)*100}%"></div></div>
-        <span class="interest-pct">${HEART_ICON} ${avg.toFixed(1)}</span>
-      </div>
-      <div class="interest-count">${m.loveCount}人が愛を送っています</div>
-    `;
-    root.appendChild(card);
-  });
+  root.innerHTML = list.map(buildCardHTML).join('');
 }
 
 function buildCardHTML(m){
