@@ -1648,6 +1648,7 @@
           <div class="post-block-label">ひとこと感想</div>
           <textarea id="review-text" maxlength="200" rows="3" placeholder="200字まで書けます(例: 泣けるけど元気が出る話でした)"></textarea>
           <div class="slider-value" id="review-count">0 / 200</div>
+          <div id="review-turnstile-widget" style="margin:8px 0;"></div>
           <div class="form-actions" id="review-submit-wrap" style="position:relative;">
             <button class="primary-btn" id="review-submit-btn" onclick="submitReview()">投稿する</button>
             <button class="ghost-btn" id="review-delete-btn" onclick="deleteReview(state.currentMovieId)" style="display:none;">この感想を削除</button>
@@ -2259,6 +2260,40 @@ function renderTurnstile(retriesLeft){
   });
 }
 
+// レビュー投稿フォーム用のTurnstileウィジェット(プロフィール登録用とは別インスタンス)。
+// 「投稿する」パネルを開くたびに呼ぶ。
+let reviewTurnstileWidgetId = null;
+let reviewTurnstileToken = null;
+
+function renderReviewTurnstile(retriesLeft){
+  if(retriesLeft === undefined) retriesLeft = 25;
+  reviewTurnstileToken = null;
+
+  if(typeof turnstile === 'undefined'){
+    if(retriesLeft <= 0){
+      console.error('Turnstileの読み込みに失敗しました');
+      return;
+    }
+    setTimeout(() => renderReviewTurnstile(retriesLeft - 1), 200);
+    return;
+  }
+
+  const container = document.getElementById('review-turnstile-widget');
+  if(!container) return;
+
+  if(reviewTurnstileWidgetId !== null){
+    turnstile.reset(reviewTurnstileWidgetId);
+    return;
+  }
+
+  reviewTurnstileWidgetId = turnstile.render(container, {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: (token) => { reviewTurnstileToken = token; },
+    'expired-callback': () => { reviewTurnstileToken = null; },
+    'error-callback': () => { reviewTurnstileToken = null; }
+  });
+}
+
 // CAPTCHAトークンを添えて匿名サインインする。既にセッションがあれば何もしない。
 // 戻り値: サインイン(または既存セッションの利用)に成功したらtrue
 async function signInAnonymouslyWithCaptcha(){
@@ -2305,13 +2340,16 @@ async function currentAuthUser(){
   return user || null;
 }
 
-// メールが登録済み(=もう匿名ではない)かどうかを画面に反映する
+// メールが登録済み(=確認まで完了している)かどうかを画面に反映する。
+// user.is_anonymousは信用せず、必ずemail_confirmed_atで判定する。
+// (updateUser({email})を呼んだ直後、確認リンクを踏む前の状態でis_anonymousが
+//  falseになるケースがあっても、email_confirmed_atが立つまでは「未確認」として扱う)
 async function renderAccountEmailSection(){
   const section = document.getElementById('account-email-section');
   if(!section) return;
 
   const user = await currentAuthUser();
-  const linkedEmail = user && !user.is_anonymous ? user.email : null;
+  const linkedEmail = user && user.email_confirmed_at ? user.email : null;
 
   document.getElementById('account-email-linked').style.display = linkedEmail ? 'block' : 'none';
   document.getElementById('account-email-linked-address').textContent = linkedEmail || '';
@@ -2344,7 +2382,9 @@ async function submitEmailLink(){
     cancelEmailLink();
   }catch(err){
     console.error('メール登録に失敗しました', err);
-    showToast('メールの登録に失敗しました。アドレスを確認してもう一度お試しください');
+    // 既に他のアカウントで確認済みのメールアドレスの場合など、GoTrueのエラー内容を
+    // そのまま出したほうが分かりやすいのでそちらを優先する。
+    showToast(err && err.message ? err.message : 'メールの登録に失敗しました。アドレスを確認してもう一度お試しください');
   }
 }
 
@@ -2926,6 +2966,14 @@ function showToast(msg){
   setTimeout(() => t.classList.remove('show'), 2400);
 }
 
+// DB側でraiseしたアプリケーション向けエラー(レート制限、CAPTCHA検証など、
+// errcode='P0001')は、そのままユーザーに見せても分かりやすい文言になっている
+// ので優先して表示する。それ以外の予期しないエラーは汎用メッセージにする。
+function friendlyErrorMessage(err, fallback){
+  if(err && err.code === 'P0001' && err.message) return err.message;
+  return fallback;
+}
+
 function switchView(id){
   document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
   document.getElementById(id).classList.add('active');
@@ -3024,7 +3072,7 @@ async function castIntensity(value){
     }
   }catch(err){
     console.error('表現度の投票に失敗しました', err);
-    showToast('投票に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
   }
 }
 
@@ -3041,6 +3089,7 @@ function togglePostPanel(){
     body.classList.remove('soft-reveal');
     void body.offsetWidth;
     body.classList.add('soft-reveal');
+    renderReviewTurnstile();
   }
 }
 
@@ -3207,7 +3256,7 @@ async function castReason(key){
     await upsertMyReview(m.id, { reason_tags: myReasons.length ? [...myReasons] : null });
   }catch(err){
     console.error('理由タグの投票に失敗しました', err);
-    showToast('投票に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
     // 失敗時はローカルの状態を元に戻す
     if(wasSelected){ myReasons.push(key); m.reasonVotes[key] += 1; }
     else { myReasons.splice(myReasons.indexOf(key), 1); m.reasonVotes[key] = Math.max(0, m.reasonVotes[key] - 1); }
@@ -3333,7 +3382,7 @@ async function cycleLove(evt){
     await upsertMyReview(m.id, { love_level: next });
   }catch(err){
     console.error('愛度の投票に失敗しました', err);
-    showToast('投票に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
   }
 }
 
@@ -3489,7 +3538,7 @@ async function deleteReview(movieId){
     await loadMovieReviews(m);
   }catch(err){
     console.error('レビューの削除に失敗しました', err);
-    showToast('削除に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '削除に失敗しました。通信環境を確認してください。'));
   }
 }
 
@@ -3513,11 +3562,33 @@ async function submitReview(force){
     return;
   }
 
+  if(!reviewTurnstileToken){
+    showToast('CAPTCHA認証を完了してください');
+    return;
+  }
+
   const m = MOVIES.find(x => x.id === state.currentMovieId);
   const wasEditing = editingMovieId === m.id;
 
   try{
-    await upsertMyReview(m.id, { review_text: text });
+    // review_text(自由記述)の投稿だけは、submit-review エッジ関数を経由させ、
+    // Cloudflare Turnstileのトークン検証を通過した場合だけ書き込む。
+    // 関数の中では呼び出しユーザー自身のJWTでmovie_reviewsに書き込むため、
+    // RLS(1人1映画1行・レート制限・review_countゲート)はそのまま有効。
+    const { data: { session } } = await supabase.auth.getSession();
+    const { data, error } = await supabase.functions.invoke('submit-review', {
+      body: { movie_id: m.id, review_text: text, captcha_token: reviewTurnstileToken },
+      headers: session ? { Authorization: `Bearer ${session.access_token}` } : undefined
+    });
+    if(error){
+      // functions.invoke()は非2xxのとき、本文で返した{error: "..."}をerror.messageに
+      // 乗せてくれないので、レスポンス本体を読み直して分かりやすいメッセージを取り出す。
+      let serverMessage = null;
+      try{ serverMessage = (await error.context.json()).error; }catch(e){ /* 本文が読めなければ諦める */ }
+      throw Object.assign(new Error(serverMessage || error.message), { code: 'P0001' });
+    }
+    if(data && data.error) throw Object.assign(new Error(data.error), { code: 'P0001' });
+
     state.hasReviewed[m.id] = true;
     state.myReviewsById[m.id] = text;
 
@@ -3536,7 +3607,10 @@ async function submitReview(force){
     await loadMovieReviews(m);
   }catch(err){
     console.error('レビューの投稿に失敗しました', err);
-    showToast('投稿に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '投稿に失敗しました。通信環境を確認してください。'));
+  }finally{
+    if(reviewTurnstileWidgetId !== null) turnstile.reset(reviewTurnstileWidgetId);
+    reviewTurnstileToken = null;
   }
 }
 
@@ -3712,7 +3786,7 @@ async function submitMovie(){
     goHome();
   }catch(err){
     console.error('映画の追加に失敗しました', err);
-    showToast('追加に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '追加に失敗しました。通信環境を確認してください。'));
   }
 }
 
@@ -3906,10 +3980,11 @@ async function loadProfile(){
       .single();
     if(error) throw error;
 
-    // 「登録済みか」は基本的にこの端末のフラグで判定するが、メール連携済みの
-    // アカウント(=もう匿名ではない)は、別端末からマジックリンクで戻ってきた
-    // 場合でもそのまま復帰できるようにする。
-    const onboarded = localStorage.getItem(ONBOARDED_KEY) === 'true' || user.is_anonymous === false;
+    // 「登録済みか」は基本的にこの端末のフラグで判定するが、メール確認まで完了した
+    // アカウントは、別端末からマジックリンクで戻ってきた場合でもそのまま復帰できる
+    // ようにする。is_anonymousではなくemail_confirmed_atで判定する
+    // (確認リンクを踏むまでは復帰扱いにしないため)。
+    const onboarded = localStorage.getItem(ONBOARDED_KEY) === 'true' || !!user.email_confirmed_at;
     if(!onboarded){
       // まだこの端末で登録を完了していない(トリガーが作った仮のプロフィールのみの状態)
       state.profile = null;
@@ -4430,7 +4505,7 @@ async function saveMyLog(){
     goProfile();
   }catch(err){
     console.error(err);
-    showToast('保存に失敗しました。通信環境を確認してください。');
+    showToast(friendlyErrorMessage(err, '保存に失敗しました。通信環境を確認してください。'));
   }
 }
 
