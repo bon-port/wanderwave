@@ -2638,7 +2638,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, pocketDiagnosis: null };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, diagnosisHistory: [] };
 
 
 function riskLabel(v){
@@ -3188,31 +3188,55 @@ function renderTagVoteChips(){
   }).join('') + `<div class="post-block-label" style="width:100%; margin-top:8px;">${myTagVotes.length}/3</div>`;
 }
 
-function castTagVote(tag){
+async function castTagVote(tag){
+  if(!state.profile){
+    showToast('感情タグへの投票には、まずニックネームを登録してください');
+    goOnboarding();
+    return;
+  }
+  if(!requireVerifiedUser()) return;
+
   const m = MOVIES.find(x => x.id === state.currentMovieId);
   if(!m.tagVotes) m.tagVotes = {};
   if(!state.myTagVotes[m.id]) state.myTagVotes[m.id] = [];
 
   const myTagVotes = state.myTagVotes[m.id];
   const idx = myTagVotes.indexOf(tag);
+  const wasSelected = idx !== -1;
+  const isFirstTag = !wasSelected && myTagVotes.length === 0;
 
-  if(idx !== -1){
+  if(wasSelected){
     myTagVotes.splice(idx, 1);
     m.tagVotes[tag] = Math.max(0, (m.tagVotes[tag] || 0) - 1);
   } else {
     if(myTagVotes.length >= 3) return; // 3つまでの上限
-    const isFirstTag = myTagVotes.length === 0;
     myTagVotes.push(tag);
     m.tagVotes[tag] = (m.tagVotes[tag] || 0) + 1;
-    if(isFirstTag){
-      celebrateSubmission(document.getElementById('tag-vote-block'), 'ありがとうございます');
-    }
   }
 
-  saveMyTagVotes();
   renderTagVoteChips();
   renderCommunityTags(m);
   renderPosterMood(m);
+
+  try{
+    const userId = await currentUserId();
+    const { error } = await supabase
+      .from('movie_tag_votes')
+      .upsert({ movie_id: m.id, user_id: userId, tags: [...myTagVotes] }, { onConflict: 'movie_id,user_id' });
+    if(error) throw error;
+    if(isFirstTag){
+      celebrateSubmission(document.getElementById('tag-vote-block'), 'ありがとうございます');
+    }
+  }catch(err){
+    console.error('感情タグの投票に失敗しました', err);
+    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
+    // 失敗時はローカルの状態を元に戻す
+    if(wasSelected){ myTagVotes.push(tag); m.tagVotes[tag] = (m.tagVotes[tag] || 0) + 1; }
+    else { myTagVotes.splice(myTagVotes.indexOf(tag), 1); m.tagVotes[tag] = Math.max(0, (m.tagVotes[tag] || 0) - 1); }
+    renderTagVoteChips();
+    renderCommunityTags(m);
+    renderPosterMood(m);
+  }
 }
 
 function tagWeights(m){
@@ -3411,16 +3435,27 @@ function spawnLoveBubble(container, level){
   setTimeout(() => el.remove(), 1400);
 }
 
-function toggleWatchLater(){
+async function toggleWatchLater(){
+  if(!requireVerifiedUser()) return;
+
   const m = MOVIES.find(x => x.id === state.currentMovieId);
-  if(state.myWatchLater[m.id]){
-    delete state.myWatchLater[m.id];
-    showToast('観たいリストから外しました');
-  } else {
-    state.myWatchLater[m.id] = true;
-    showToast('あとで観るに追加しました');
+  const userId = await currentUserId();
+  try{
+    if(state.myWatchLater[m.id]){
+      const { error } = await supabase.from('watch_later').delete().eq('user_id', userId).eq('movie_id', m.id);
+      if(error) throw error;
+      delete state.myWatchLater[m.id];
+      showToast('観たいリストから外しました');
+    } else {
+      const { error } = await supabase.from('watch_later').insert({ user_id: userId, movie_id: m.id });
+      if(error) throw error;
+      state.myWatchLater[m.id] = true;
+      showToast('あとで観るに追加しました');
+    }
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, '保存に失敗しました。通信環境を確認してください。'));
   }
-  saveMyWatchLater();
 }
 
 async function cycleLove(evt){
@@ -3525,7 +3560,27 @@ async function goDetail(id){
   renderRecommended(m);
   switchView('view-detail');
 
-  await loadMovieReviews(m);
+  await Promise.all([loadMovieReviews(m), loadMovieTagVotes(m)]);
+}
+
+// この映画に投票された感情タグ(3つの初期タグ以外にみんなが追加投票したもの)を
+// 集計する。自分がどのタグに投票済みかはstate.myTagVotes(init時に一括取得済み)
+// を使うので、ここではみんなの合計だけを取りに行く。
+async function loadMovieTagVotes(m){
+  try{
+    const { data, error } = await supabase.from('movie_tag_votes').select('tags').eq('movie_id', m.id);
+    if(error) throw error;
+    const counts = {};
+    (data || []).forEach(row => {
+      (row.tags || []).forEach(tag => { counts[tag] = (counts[tag] || 0) + 1; });
+    });
+    m.tagVotes = counts;
+    if(state.currentMovieId !== m.id) return; // 別の映画に移動していたら反映しない
+    renderCommunityTags(m);
+    renderPosterMood(m);
+  }catch(err){
+    console.error('感情タグ投票の読み込みに失敗しました', err);
+  }
 }
 
 // この映画のレビュー本文一覧(movie_reviews.review_text)を取得して描画する。
@@ -3993,47 +4048,56 @@ async function upsertMyReview(movieId, fields){
   if(error) throw error;
 }
 
-async function saveMyWatchLater(){
-  try{ await window.storage.set('filmo-my-watch-later', JSON.stringify(state.myWatchLater), false); }
-  catch(err){ console.error(err); }
-}
 async function loadMyWatchLater(){
   try{
-    const result = await window.storage.get('filmo-my-watch-later', false);
-    state.myWatchLater = JSON.parse(result.value);
-  }catch(err){ state.myWatchLater = {}; }
+    const userId = await currentUserId();
+    if(!userId){ state.myWatchLater = {}; return; }
+    const { data, error } = await supabase.from('watch_later').select('movie_id').eq('user_id', userId);
+    if(error) throw error;
+    state.myWatchLater = {};
+    (data || []).forEach(row => { state.myWatchLater[row.movie_id] = true; });
+  }catch(err){
+    console.error(err);
+    state.myWatchLater = {};
+  }
 }
 
-async function saveMyTagVotes(){
-  try{ await window.storage.set('filmo-my-tag-votes', JSON.stringify(state.myTagVotes), false); }
-  catch(err){ console.error(err); }
-}
 async function loadMyTagVotes(){
   try{
-    const result = await window.storage.get('filmo-my-tag-votes', false);
-    state.myTagVotes = JSON.parse(result.value);
-  }catch(err){ state.myTagVotes = {}; }
+    const userId = await currentUserId();
+    if(!userId){ state.myTagVotes = {}; return; }
+    const { data, error } = await supabase.from('movie_tag_votes').select('movie_id, tags').eq('user_id', userId);
+    if(error) throw error;
+    state.myTagVotes = {};
+    (data || []).forEach(row => { state.myTagVotes[row.movie_id] = [...(row.tags || [])]; });
+  }catch(err){
+    console.error(err);
+    state.myTagVotes = {};
+  }
 }
 
-async function savePocketDiagnosis(){
-  try{ await window.storage.set('filmo-pocket-diagnosis', JSON.stringify(state.pocketDiagnosis), false); }
-  catch(err){ console.error(err); }
-}
-async function loadPocketDiagnosis(){
-  try{
-    const result = await window.storage.get('filmo-pocket-diagnosis', false);
-    state.pocketDiagnosis = JSON.parse(result.value);
-  }catch(err){ state.pocketDiagnosis = null; }
-}
-async function saveDiagnosisHistory(){
-  try{ await window.storage.set('filmo-diagnosis-history', JSON.stringify(state.diagnosisHistory || []), false); }
-  catch(err){ console.error(err); }
-}
 async function loadDiagnosisHistory(){
   try{
-    const result = await window.storage.get('filmo-diagnosis-history', false);
-    state.diagnosisHistory = JSON.parse(result.value);
-  }catch(err){ state.diagnosisHistory = []; }
+    const userId = await currentUserId();
+    if(!userId){ state.diagnosisHistory = []; return; }
+    const { data, error } = await supabase
+      .from('diagnosis_history')
+      .select('id, created_at, name, body, top_tag, movie_ids')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    if(error) throw error;
+    state.diagnosisHistory = (data || []).map(row => ({
+      id: row.id,
+      date: row.created_at,
+      name: row.name,
+      body: row.body,
+      topTag: row.top_tag,
+      movieIds: row.movie_ids || []
+    }));
+  }catch(err){
+    console.error(err);
+    state.diagnosisHistory = [];
+  }
 }
 
 
@@ -4665,24 +4729,37 @@ function isInPocket(movieId){
   return state.myPocket.includes(movieId);
 }
 
-function togglePocketMembership(movieId){
+async function togglePocketMembership(movieId){
+  const userId = await currentUserId();
+  if(!userId) return;
   const idx = state.myPocket.indexOf(movieId);
-  if(idx !== -1){
-    state.myPocket.splice(idx, 1);
-  } else {
-    state.myPocket.push(movieId);
+  try{
+    if(idx !== -1){
+      const { error } = await supabase.from('pockets').delete().eq('user_id', userId).eq('movie_id', movieId);
+      if(error) throw error;
+      state.myPocket.splice(idx, 1);
+    } else {
+      const { error } = await supabase.from('pockets').insert({ user_id: userId, movie_id: movieId });
+      if(error) throw error;
+      state.myPocket.push(movieId);
+    }
+  }catch(err){
+    console.error('ポケットの更新に失敗しました', err);
+    showToast(friendlyErrorMessage(err, '保存に失敗しました。通信環境を確認してください。'));
   }
-  saveMyPocket();
 }
 
-async function saveMyPocket(){
-  try{ await window.storage.set('filmo-my-pocket', JSON.stringify(state.myPocket), false); }
-  catch(err){ console.error(err); }
-}
 async function loadMyPocket(){
   try{
-    const result = await window.storage.get('filmo-my-pocket', false);
-    state.myPocket = JSON.parse(result.value);
+    const userId = await currentUserId();
+    if(!userId){ state.myPocket = []; return; }
+    const { data, error } = await supabase
+      .from('pockets')
+      .select('movie_id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    if(error) throw error;
+    state.myPocket = (data || []).map(row => row.movie_id);
   }catch(err){ state.myPocket = []; }
 }
 
@@ -4740,8 +4817,10 @@ function generateDiagnosis(pocketMovies){
   }
 
   let continuityNote = "";
+  // state.diagnosisHistoryはDBからcreated_at降順(新しい順)で読み込んでいるので、
+  // 直前の診断は先頭(index 0)にある。
   const history = state.diagnosisHistory || [];
-  const prev = history[history.length - 1];
+  const prev = history[0];
   if(prev && prev.topTag){
     continuityNote = prev.topTag === topTag
       ? "同一の構造は前回の診断でも観測されており、選択傾向は固定化している。"
@@ -4841,35 +4920,59 @@ function showNewListInput(containerId, onCreate){
 }
 
 function createNewList(){
+  if(!requireVerifiedUser()) return;
   showNewListInput('new-list-form', 'confirmCreateNewList');
 }
 
-function confirmCreateNewList(){
+// list_itemsテーブルへの新規行と(必要なら)最初の1本の映画をまとめて作る。
+// 呼び出し側でrequireVerifiedUser()済みであることを前提とする。
+async function createUserList(name, initialMovieId){
+  const userId = await currentUserId();
+  const { data, error } = await supabase.from('user_lists').insert({ user_id: userId, name }).select('id').single();
+  if(error) throw error;
+  const newList = { id: String(data.id), name, movieIds: [] };
+  if(initialMovieId != null){
+    const { error: itemErr } = await supabase.from('user_list_items').insert({ list_id: data.id, movie_id: initialMovieId });
+    if(itemErr) throw itemErr;
+    newList.movieIds.push(initialMovieId);
+  }
+  state.myLists.push(newList);
+  return newList;
+}
+
+async function confirmCreateNewList(){
   const input = document.getElementById('new-list-name-input');
   const name = input.value.trim();
   if(!name) return;
-  const newList = { id: 'list_' + Date.now(), name, movieIds: [] };
-  state.myLists.push(newList);
-  saveMyLists();
-  document.getElementById('new-list-form').innerHTML = '';
-  renderListsGrid();
-  showToast('リストを作りました');
+  try{
+    await createUserList(name);
+    document.getElementById('new-list-form').innerHTML = '';
+    renderListsGrid();
+    showToast('リストを作りました');
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, 'リストの作成に失敗しました。通信環境を確認してください。'));
+  }
 }
 
 function createNewListFromPocket(){
+  if(!requireVerifiedUser()) return;
   showNewListInput('pocket-new-list-form', 'confirmCreateNewListFromPocket');
 }
 
-function confirmCreateNewListFromPocket(){
+async function confirmCreateNewListFromPocket(){
   const input = document.getElementById('new-list-name-input');
   const name = input.value.trim();
   if(!name) return;
-  const newList = { id: 'list_' + Date.now(), name, movieIds: [] };
-  state.myLists.push(newList);
-  saveMyLists();
-  document.getElementById('pocket-new-list-form').innerHTML = '';
-  renderListsGrid('pocket-lists-grid');
-  showToast('リストを作りました');
+  try{
+    await createUserList(name);
+    document.getElementById('pocket-new-list-form').innerHTML = '';
+    renderListsGrid('pocket-lists-grid');
+    showToast('リストを作りました');
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, 'リストの作成に失敗しました。通信環境を確認してください。'));
+  }
 }
 
 function goListDetail(listId){
@@ -4918,16 +5021,22 @@ function startInlineRename(){
   inputEl.select();
 }
 
-function confirmInlineRename(){
+async function confirmInlineRename(){
   const list = getCurrentList();
   const nameEl = document.getElementById('list-detail-name');
   const inputEl = document.getElementById('list-name-inline-input');
   const name = inputEl.value.trim();
 
   if(name && list){
-    list.name = name;
-    saveMyLists();
-    showToast('名前を変更しました');
+    try{
+      const { error } = await supabase.from('user_lists').update({ name }).eq('id', parseInt(list.id, 10));
+      if(error) throw error;
+      list.name = name;
+      showToast('名前を変更しました');
+    }catch(err){
+      console.error(err);
+      showToast(friendlyErrorMessage(err, '変更に失敗しました。通信環境を確認してください。'));
+    }
   }
 
   inputEl.style.display = 'none';
@@ -4946,11 +5055,18 @@ function deleteCurrentList(){
   `;
 }
 
-function confirmDeleteList(){
-  state.myLists = state.myLists.filter(l => l.id !== state.currentListId);
-  saveMyLists();
-  goLists();
-  showToast('リストを削除しました');
+async function confirmDeleteList(){
+  const listId = state.currentListId;
+  try{
+    const { error } = await supabase.from('user_lists').delete().eq('id', parseInt(listId, 10));
+    if(error) throw error;
+    state.myLists = state.myLists.filter(l => l.id !== listId);
+    goLists();
+    showToast('リストを削除しました');
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, '削除に失敗しました。通信環境を確認してください。'));
+  }
 }
 
 function parseGradientColors(gradientStr){
@@ -5099,18 +5215,19 @@ async function shareCurrentList(){
   }
 }
 
-function addMovieToList(listId){
+async function addMovieToList(listId){
   if(listId === 'pocket'){
-    togglePocketMembership(state.currentMovieId);
+    await togglePocketMembership(state.currentMovieId);
     renderAddToListOptions();
     showToast(isInPocket(state.currentMovieId) ? 'ポケットに入れました' : '海に帰りました');
     return;
   }
   if(listId === 'watch_later'){
-    toggleWatchLater();
+    await toggleWatchLater();
     renderAddToListOptions();
     return;
   }
+  if(!requireVerifiedUser()) return;
   const list = state.myLists.find(l => l.id === listId);
   if(!list) return;
   const m = MOVIES.find(x => x.id === state.currentMovieId);
@@ -5118,10 +5235,16 @@ function addMovieToList(listId){
     showToast(`すでに「${list.name}」に入っています`);
     return;
   }
-  list.movieIds.push(m.id);
-  saveMyLists();
-  showToast(`「${list.name}」に追加しました`);
-  renderAddToListOptions();
+  try{
+    const { error } = await supabase.from('user_list_items').insert({ list_id: parseInt(list.id, 10), movie_id: m.id });
+    if(error) throw error;
+    list.movieIds.push(m.id);
+    showToast(`「${list.name}」に追加しました`);
+    renderAddToListOptions();
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, '追加に失敗しました。通信環境を確認してください。'));
+  }
 }
 
 function renderAddToListOptions(){
@@ -5161,29 +5284,40 @@ function closeAddToListModal(){
 }
 
 function createListFromModal(){
+  if(!requireVerifiedUser()) return;
   showNewListInput('new-list-from-detail-form', 'confirmCreateListFromModal');
 }
 
-function confirmCreateListFromModal(){
+async function confirmCreateListFromModal(){
   const input = document.getElementById('new-list-name-input');
   const name = input.value.trim();
   if(!name) return;
-  const newList = { id: 'list_' + Date.now(), name, movieIds: [state.currentMovieId] };
-  state.myLists.push(newList);
-  saveMyLists();
-  showToast(`「${newList.name}」を作って追加しました`);
-  document.getElementById('new-list-from-detail-form').innerHTML = '';
-  renderAddToListOptions();
+  try{
+    const newList = await createUserList(name, state.currentMovieId);
+    showToast(`「${newList.name}」を作って追加しました`);
+    document.getElementById('new-list-from-detail-form').innerHTML = '';
+    renderAddToListOptions();
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, 'リストの作成に失敗しました。通信環境を確認してください。'));
+  }
 }
 
-async function saveMyLists(){
-  try{ await window.storage.set('filmo-my-lists', JSON.stringify(state.myLists), false); }
-  catch(err){ console.error(err); }
-}
 async function loadMyLists(){
   try{
-    const result = await window.storage.get('filmo-my-lists', false);
-    state.myLists = JSON.parse(result.value);
+    const userId = await currentUserId();
+    if(!userId){ state.myLists = []; return; }
+    const { data, error } = await supabase
+      .from('user_lists')
+      .select('id, name, user_list_items(movie_id)')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true });
+    if(error) throw error;
+    state.myLists = (data || []).map(row => ({
+      id: String(row.id),
+      name: row.name,
+      movieIds: (row.user_list_items || []).map(item => item.movie_id)
+    }));
   }catch(err){ state.myLists = []; }
 }
 
@@ -5273,7 +5407,7 @@ function toggleDiagnosisPick(id){
   renderDiagnosisPicker();
 }
 
-function runNewDiagnosis(){
+async function runNewDiagnosis(){
   if(diagnosisSelection.length !== DIAGNOSIS_MAX_PICK) return;
   const selectedMovies = diagnosisSelection.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
   const diagnosis = generateDiagnosis(selectedMovies);
@@ -5313,15 +5447,33 @@ function runNewDiagnosis(){
   const saveNoteEl = document.getElementById('diagnosis-save-note');
   if(isVerifiedUser()){
     saveNoteEl.style.display = 'none';
-    if(!state.diagnosisHistory) state.diagnosisHistory = [];
-    state.diagnosisHistory.push({
-      date: new Date().toISOString(),
-      name: diagnosis.name,
-      body: diagnosis.body,
-      topTag: diagnosis.topTag,
-      movieIds: diagnosisSelection.slice()
-    });
-    saveDiagnosisHistory();
+    try{
+      const userId = await currentUserId();
+      const { data, error } = await supabase
+        .from('diagnosis_history')
+        .insert({
+          user_id: userId,
+          name: diagnosis.name,
+          body: diagnosis.body,
+          top_tag: diagnosis.topTag,
+          movie_ids: diagnosisSelection.slice()
+        })
+        .select('id, created_at')
+        .single();
+      if(error) throw error;
+      if(!state.diagnosisHistory) state.diagnosisHistory = [];
+      state.diagnosisHistory.unshift({
+        id: data.id,
+        date: data.created_at,
+        name: diagnosis.name,
+        body: diagnosis.body,
+        topTag: diagnosis.topTag,
+        movieIds: diagnosisSelection.slice()
+      });
+    }catch(err){
+      console.error('診断結果の保存に失敗しました', err);
+      showToast(friendlyErrorMessage(err, '診断結果の保存に失敗しました。通信環境を確認してください。'));
+    }
   } else {
     saveNoteEl.style.display = 'block';
   }
@@ -5351,39 +5503,45 @@ function closeDiagnosisHistoryModal(){
 
 function renderDiagnosisHistoryList(){
   const root = document.getElementById('diagnosis-history-list');
+  // state.diagnosisHistoryはDBからcreated_at降順(新しい順)で読み込んでいるので、
+  // ここでの並べ替えは不要。
   const history = state.diagnosisHistory || [];
   if(history.length === 0){
     root.innerHTML = `<div class="diagnosis-history-empty">まだ記憶がありません。診断すると、ここに積み重なっていきます。</div>`;
     return;
   }
-  const sorted = history.map((h, i) => ({ ...h, _idx: i })).reverse();
-  root.innerHTML = sorted.map(h => {
+  root.innerHTML = history.map(h => {
     const d = new Date(h.date);
     const dateStr = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
     const color = TAG_COLORS[h.topTag] || 'var(--line)';
     return `
-      <div class="diagnosis-history-card" id="diag-history-card-${h._idx}">
+      <div class="diagnosis-history-card" id="diag-history-card-${h.id}">
         <div class="diagnosis-history-color" style="background:${color};"></div>
         <div class="diagnosis-history-info">
           <div class="diagnosis-history-date">${dateStr}</div>
           <div class="diagnosis-history-name">${h.name}</div>
         </div>
-        <button class="diagnosis-history-delete" onclick="deleteDiagnosisHistoryItem(${h._idx})">🗑</button>
+        <button class="diagnosis-history-delete" onclick="deleteDiagnosisHistoryItem(${h.id})">🗑</button>
       </div>
     `;
   }).join('');
 }
 
-function deleteDiagnosisHistoryItem(idx){
-  const card = document.getElementById(`diag-history-card-${idx}`);
-  if(card){
-    card.classList.add('removing');
-    setTimeout(() => {
-      state.diagnosisHistory.splice(idx, 1);
-      saveDiagnosisHistory();
+function deleteDiagnosisHistoryItem(id){
+  const card = document.getElementById(`diag-history-card-${id}`);
+  if(card) card.classList.add('removing');
+  setTimeout(async () => {
+    try{
+      const { error } = await supabase.from('diagnosis_history').delete().eq('id', id);
+      if(error) throw error;
+      state.diagnosisHistory = state.diagnosisHistory.filter(h => h.id !== id);
       renderDiagnosisHistoryList();
-    }, 280);
-  }
+    }catch(err){
+      console.error('診断履歴の削除に失敗しました', err);
+      showToast(friendlyErrorMessage(err, '削除に失敗しました。通信環境を確認してください。'));
+      renderDiagnosisHistoryList();
+    }
+  }, 280);
 }
 
 function renderHistory(){
@@ -5481,7 +5639,7 @@ function submitContact(){
 async function init(){
   document.getElementById('results').innerHTML = '<div class="empty">読み込み中...</div>';
   await checkExistingSession(); // 既存セッションの有無だけ確認。匿名サインインはプロフィール登録フォームでCAPTCHA通過後に行う
-  await Promise.all([loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadPocketDiagnosis(), loadDiagnosisHistory()]);
+  await Promise.all([loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory()]);
 
   renderTagCloud();
   renderResults();
