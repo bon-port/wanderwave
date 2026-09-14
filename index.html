@@ -1914,6 +1914,9 @@
         <div class="pocket-diagnosis-text" id="new-diagnosis-text"></div>
         <div id="new-diagnosis-movies" class="diagnosis-result-movies"></div>
         <div id="new-diagnosis-rec" class="pocket-diagnosis-rec" style="display:none;"></div>
+        <div id="diagnosis-save-note" class="note" style="display:none; margin-top:10px;">
+          この結果は保存されていません。<button class="link-btn" style="display:inline; padding:0; font-size:inherit;" onclick="startEmailLink()">メールを登録</button>すると、今後の記録がずっと積み重なっていきます。
+        </div>
       </div>
 
       <button class="link-btn diagnosis-history-link" onclick="openDiagnosisHistoryModal()">過去の記憶を見る</button>
@@ -2410,8 +2413,12 @@ async function renderAccountEmailSection(){
 }
 
 function startEmailLink(){
-  document.getElementById('account-email-prompt').style.display = 'none';
-  document.getElementById('account-email-form').style.display = 'block';
+  const prompt = document.getElementById('account-email-prompt');
+  const form = document.getElementById('account-email-form');
+  if(prompt) prompt.style.display = 'none';
+  form.style.display = 'block';
+  // 診断結果など、ページ下の方から呼ばれることもあるのでフォームまでスクロールする
+  form.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 function cancelEmailLink(){
@@ -3020,8 +3027,13 @@ function showToast(msg){
 // DB側でraiseしたアプリケーション向けエラー(レート制限、CAPTCHA検証など、
 // errcode='P0001')は、そのままユーザーに見せても分かりやすい文言になっている
 // ので優先して表示する。それ以外の予期しないエラーは汎用メッセージにする。
+// RLSの拒否(42501)は、大抵はメール未確認のまま投稿しようとしたケース
+// (state.profileが古いままだった等)なので、その場合も分かりやすく案内する。
 function friendlyErrorMessage(err, fallback){
   if(err && err.code === 'P0001' && err.message) return err.message;
+  if(err && (err.code === '42501' || (err.message && err.message.includes('row-level security')))){
+    return '投稿にはメールの登録(1分で終わります)が必要です';
+  }
   return fallback;
 }
 
@@ -3089,8 +3101,19 @@ function onIntensitySliderInput(value){
 
 async function castIntensity(value){
   const m = MOVIES.find(x => x.id === state.currentMovieId);
-  const { postCount } = computeTrust();
 
+  if(!state.profile){
+    document.getElementById('intensity-slider').value = state.myIntensity[m.id] || 50;
+    showToast('表現度の投票には、まずニックネームを登録してください');
+    goOnboarding();
+    return;
+  }
+  if(!requireVerifiedUser()){
+    document.getElementById('intensity-slider').value = state.myIntensity[m.id] || 50;
+    return;
+  }
+
+  const { postCount } = computeTrust();
   if(postCount === 0){
     document.getElementById('intensity-slider').value = state.myIntensity[m.id] || 50;
     showToast('表現度の投票には、まずレビューを1件書いてみてください');
@@ -3277,8 +3300,15 @@ function renderReasonChips(m){
 
 async function castReason(key){
   const m = MOVIES.find(x => x.id === state.currentMovieId);
-  const { postCount } = computeTrust();
 
+  if(!state.profile){
+    showToast('この投票には、まずニックネームを登録してください');
+    goOnboarding();
+    return;
+  }
+  if(!requireVerifiedUser()) return;
+
+  const { postCount } = computeTrust();
   if(postCount === 0){
     showToast('この投票には、まずレビューを1件書いてみてください');
     return;
@@ -3399,6 +3429,7 @@ async function cycleLove(evt){
     goOnboarding();
     return;
   }
+  if(!requireVerifiedUser()) return;
 
   const m = MOVIES.find(x => x.id === state.currentMovieId);
   const prev = state.myLove[m.id] || 0;
@@ -3599,6 +3630,7 @@ async function submitReview(force){
     goOnboarding();
     return;
   }
+  if(!requireVerifiedUser()) return;
 
   const text = document.getElementById('review-text').value.trim();
   if(!text){ showToast('レビュー内容を入力してください'); return; }
@@ -3777,6 +3809,7 @@ async function submitMovie(){
     goOnboarding();
     return;
   }
+  if(!requireVerifiedUser()) return;
 
   const today = new Date().toISOString().slice(0, 10);
   if(state.lastSubmissionDate !== today){
@@ -4076,7 +4109,10 @@ async function loadProfile(){
       avatarPhoto: data.avatar_photo_url || null,
       avatarPhotoPosX: crop.x,
       avatarPhotoPosY: crop.y,
-      reviewCount: data.review_count || 0
+      reviewCount: data.review_count || 0,
+      // レビュー投稿・映画追加・診断結果の保存など、荒らし対策で
+      // メール確認済みユーザー限定にしている機能の判定に使う。
+      emailVerified: user.is_anonymous === false && !!user.email_confirmed_at
     };
   }catch(err){
     console.error(err);
@@ -4165,6 +4201,20 @@ function computeTrust(){
 
 function myVoteWeight(){
   return computeTrust().tier.weight;
+}
+
+// レビュー投稿・映画追加など、荒らし対策でメール確認済みユーザー限定にしている
+// 操作の入口で呼ぶ。未確認なら、優しい案内を出してプロフィール画面(メール追加
+// ボタンがある場所)へ誘導し、falseを返す。呼び出し側はfalseならその場で処理を中断する。
+function isVerifiedUser(){
+  return !!(state.profile && state.profile.emailVerified);
+}
+
+function requireVerifiedUser(){
+  if(isVerifiedUser()) return true;
+  showToast('投稿にはメールの登録(1分で終わります)が必要です');
+  goProfile();
+  return false;
 }
 
 function updateHeader(){
@@ -4400,7 +4450,8 @@ async function submitProfile(){
   }
 
   const previousReviewCount = state.profile ? (state.profile.reviewCount || 0) : 0;
-  state.profile = { nickname, avatarColor: pendingAvatarColor, avatarPhoto: pendingAvatarPhoto, avatarPhotoPosX: pendingAvatarPosX, avatarPhotoPosY: pendingAvatarPosY, reviewCount: previousReviewCount };
+  const previousEmailVerified = state.profile ? !!state.profile.emailVerified : false;
+  state.profile = { nickname, avatarColor: pendingAvatarColor, avatarPhoto: pendingAvatarPhoto, avatarPhotoPosX: pendingAvatarPosX, avatarPhotoPosY: pendingAvatarPosY, reviewCount: previousReviewCount, emailVerified: previousEmailVerified };
   await saveProfile();
   updateHeader();
   showToast(isFirstRegistration ? '登録しました' : 'プロフィールを保存しました');
@@ -5257,15 +5308,23 @@ function runNewDiagnosis(){
     resultEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
   });
 
-  if(!state.diagnosisHistory) state.diagnosisHistory = [];
-  state.diagnosisHistory.push({
-    date: new Date().toISOString(),
-    name: diagnosis.name,
-    body: diagnosis.body,
-    topTag: diagnosis.topTag,
-    movieIds: diagnosisSelection.slice()
-  });
-  saveDiagnosisHistory();
+  // 結果の閲覧自体は匿名のままでも自由だが、積み重ねて残す(履歴保存)のは
+  // メール確認済みユーザーのみ。未確認の場合は保存せず、控えめな案内だけ出す。
+  const saveNoteEl = document.getElementById('diagnosis-save-note');
+  if(isVerifiedUser()){
+    saveNoteEl.style.display = 'none';
+    if(!state.diagnosisHistory) state.diagnosisHistory = [];
+    state.diagnosisHistory.push({
+      date: new Date().toISOString(),
+      name: diagnosis.name,
+      body: diagnosis.body,
+      topTag: diagnosis.topTag,
+      movieIds: diagnosisSelection.slice()
+    });
+    saveDiagnosisHistory();
+  } else {
+    saveNoteEl.style.display = 'block';
+  }
 
   // 診断に使った選択は必ずクリアして、次にまた新しく選べるようにする
   diagnosisSelection.length = 0;
