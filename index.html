@@ -3066,6 +3066,7 @@ function renderIntensityGauge(m){
   const avg = intensityAverage(m);
   const pct = reasonPercentages(m);
   const isLowConfidence = m.intensityCount > 0 && m.intensityCount < MIN_RELIABLE_VOTES;
+  const showBreakdown = m.intensityCount > 0 || m.expressionEstimated;
 
   root.innerHTML = `
     ${isLowConfidence ? `
@@ -3073,11 +3074,16 @@ function renderIntensityGauge(m){
         評価がまだ${m.intensityCount}人分しかありません。1人の投票の影響が大きいため、参考程度にしてください。
       </div>
     ` : ''}
+    ${m.expressionEstimated ? `
+      <div class="low-confidence-warning">
+        これは公式レーティング等をもとにしたAIによる推定値です。投票が集まると更新されます。
+      </div>
+    ` : ''}
     <div class="risk-track"><div class="risk-marker" style="left:${avg}%"></div></div>
     <div class="risk-legend"><span>控えめ</span><span>軽度</span><span>やや強い</span><span>強い</span></div>
-    <div class="expr-axis-count">${m.intensityCount > 0 ? `${m.intensityCount}人が評価しています` : 'まだ誰も評価していません'}</div>
+    <div class="expr-axis-count">${m.intensityCount > 0 ? `${m.intensityCount}人が評価しています` : (m.expressionEstimated ? '推定値を表示しています(投票はまだありません)' : 'まだ誰も評価していません')}</div>
 
-    ${m.intensityCount > 0 ? `
+    ${showBreakdown ? `
       <div class="reason-breakdown">
         <div class="reason-breakdown-title">当てはまる表現の内訳</div>
         <div class="reason-bar-row"><span class="reason-bar-label">暴力</span><div class="reason-bar-track"><div class="reason-bar-fill" style="width:${pct.violence}%; background:#d9836a;"></div></div><span class="reason-bar-pct">${pct.violence}%</span></div>
@@ -3952,18 +3958,29 @@ async function submitMovie(){
 // (movie_reviewsを映画ごとに集計したもの)から読み込む。
 async function loadMovies(){
   try{
-    const [moviesRes, statsRes] = await Promise.all([
+    const [moviesRes, statsRes, estimatesRes] = await Promise.all([
       supabase.from('movies').select('id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis'),
-      supabase.from('movie_review_stats').select('*')
+      supabase.from('movie_review_stats').select('*'),
+      supabase.from('movie_expression_estimates').select('movie_id, expression_level, reason_tags')
     ]);
     if(moviesRes.error) throw moviesRes.error;
     if(statsRes.error) throw statsRes.error;
+    if(estimatesRes.error) throw estimatesRes.error;
 
     const statsByMovie = {};
     (statsRes.data || []).forEach(s => { statsByMovie[s.movie_id] = s; });
+    const estimatesByMovie = {};
+    (estimatesRes.data || []).forEach(e => { estimatesByMovie[e.movie_id] = e; });
 
     MOVIES = (moviesRes.data || []).map(row => {
       const s = statsByMovie[row.id];
+      const intensityCount = s ? Number(s.intensity_count) : 0;
+      const estimate = estimatesByMovie[row.id];
+      // 実際の投票が1件もない映画は、公式レーティング等をもとにした推定値
+      // (movie_expression_estimates)を表示のフォールバックとして使う。
+      // 実際の投票が集まった時点で、通常通りその集計が優先される。
+      const useEstimate = intensityCount === 0 && !!estimate;
+
       return {
         id: row.id,
         // titleはこの後、色々なテンプレート内でinnerHTMLとしてそのまま差し込まれる。
@@ -3982,14 +3999,21 @@ async function loadMovies(){
         reviews: [],
         loveSum: s ? Number(s.love_sum) : 0,
         loveCount: s ? Number(s.love_count) : 0,
-        intensitySum: s ? Number(s.intensity_weight_sum) : 0,
-        intensityWeight: s ? Number(s.intensity_weight_total) : 0,
-        intensityCount: s ? Number(s.intensity_count) : 0,
-        reasonVotes: {
-          violence: s ? Number(s.reason_violence) : 0,
-          sexual: s ? Number(s.reason_sexual) : 0,
-          fear: s ? Number(s.reason_fear) : 0
-        }
+        intensitySum: useEstimate ? estimate.expression_level : (s ? Number(s.intensity_weight_sum) : 0),
+        intensityWeight: useEstimate ? 1 : (s ? Number(s.intensity_weight_total) : 0),
+        intensityCount: intensityCount,
+        expressionEstimated: useEstimate,
+        reasonVotes: useEstimate
+          ? {
+              violence: (estimate.reason_tags || []).includes('violence') ? 1 : 0,
+              sexual: (estimate.reason_tags || []).includes('sexual') ? 1 : 0,
+              fear: (estimate.reason_tags || []).includes('fear') ? 1 : 0
+            }
+          : {
+              violence: s ? Number(s.reason_violence) : 0,
+              sexual: s ? Number(s.reason_sexual) : 0,
+              fear: s ? Number(s.reason_fear) : 0
+            }
       };
     });
   }catch(err){
