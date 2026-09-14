@@ -290,6 +290,16 @@
   .results::-webkit-scrollbar{ height: 5px; }
   .results::-webkit-scrollbar-thumb{ background: var(--line); border-radius: 3px; }
 
+  /* 映画カード・レビュー・履歴の各アイテムがリストに現れる時、ふわっと
+     フェード+わずかに浮き上がって表示されるようにする(テンポは中間くらい) */
+  @keyframes cardFadeIn{
+    from{ opacity: 0; transform: translateY(8px); }
+    to{ opacity: 1; transform: translateY(0); }
+  }
+  .result-card, .review-card, .history-item{
+    animation: cardFadeIn 0.4s ease-out both;
+  }
+
   .result-card{
     flex: 0 0 148px;
     scroll-snap-align: start;
@@ -931,8 +941,11 @@
     to{ opacity: 1; }
   }
   .splash.closing{
-    animation: irisClose 0.7s cubic-bezier(.65,0,.35,1) forwards;
-    animation-delay: 1.5s;
+    /* animation-delayはここでは付けない。JS側で「実際に閉じてよいタイミング」に
+       なってから.closingを付けるので、CSS側でさらに遅らせると二重に遅延して
+       しまい、.hiddenが先に付いてアニメーションが再生されないまま消えていた
+       (発生していたバグの原因)。 */
+    animation: irisClose 0.6s cubic-bezier(.65,0,.35,1) forwards;
   }
   @keyframes irisClose{
     to{ clip-path: circle(0% at 50% 50%); }
@@ -994,7 +1007,6 @@
   .splash.closing .splash-logo,
   .splash.closing .splash-tag{
     animation: fadeOutUp 0.4s ease forwards;
-    animation-delay: 1.3s;
   }
   @keyframes fadeOutUp{ to{ opacity:0; transform: translateY(-10px); } }
   .splash.hidden{ display:none; }
@@ -1808,14 +1820,15 @@
           <div class="note">✓ <span id="account-email-linked-address"></span> を登録済みです。他の端末ではこのメールアドレスでログインできます。</div>
         </div>
         <div id="account-email-prompt" style="display:none;">
-          <button class="link-btn" onclick="startEmailLink()">メールを登録して他の端末でも続きを見られるようにする</button>
+          <button class="ghost-btn" style="width:100%;" onclick="startEmailLink()">✉️ メールを追加</button>
+          <div class="note" style="margin-top:6px;">他の端末でも続きを見られるようになります(任意)</div>
         </div>
         <div id="account-email-form" style="display:none; margin-top:8px;">
           <div class="field">
             <label>メールアドレス</label>
             <input class="field-input" id="account-email-input" type="email" placeholder="例: you@example.com">
           </div>
-          <div class="note">確認メールを送ります。メール内のリンクを開くと登録が完了し、ニックネームやレビューなどこれまでのデータはそのまま引き継がれます。</div>
+          <div class="note">確認メールを送ります。メール内のリンクを開くと登録が完了し、ニックネームやレビューなどこれまでのデータはそのまま引き継がれます。別の端末でも、このメールアドレス宛のログインリンクで続きを見られるようになります。</div>
           <div class="form-actions">
             <button class="primary-btn" onclick="submitEmailLink()">確認メールを送る</button>
             <button class="ghost-btn" onclick="cancelEmailLink()">やめる</button>
@@ -1861,7 +1874,7 @@
         </div>
 
         <div class="note">
-          パスワードは使いません。ニックネームとアイコンで「あなた」を識別する、シンプルな登録です。この端末に保存され、あとからいつでも変更できます。メールアドレスは、登録後に任意で追加できます。
+          パスワード不要。ニックネームだけで、すぐ始められます。
         </div>
 
         <button class="link-btn" id="profile-magic-login-link" style="width:100%; display:none;" onclick="goMagicLogin()">すでにメールを登録済みの方はこちら(メールでログイン)</button>
@@ -5420,11 +5433,21 @@ async function init(){
   updateHeader();
 }
 
-init();
-
+// スプラッシュは「固定タイマーで閉じる」のではなく、init()(=データ読み込みと
+// ホーム画面の初回描画)が実際に終わってから閉じる。以前は1500ms/2200msの
+// 固定タイマーで閉じており、読み込みが重い時に閉じるアニメーション自体が
+// (CSS側の余分なanimation-delayと合わさって).hiddenで先にdisplay:noneに
+// なってしまい、再生されないまま消えることがあった。
 const splash = document.getElementById('splash');
-setTimeout(() => splash.classList.add('closing'), 1500);
-setTimeout(() => splash.classList.add('hidden'), 2200);
+const SPLASH_MIN_MS = 1400; // ロゴ演出が一瞬で終わって見えないための最低表示時間
+const SPLASH_CLOSE_MS = 600; // .splash.closingのirisClose継続時間と合わせる
+function wait(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
+
+Promise.all([init().catch(err => console.error('初期化に失敗しました', err)), wait(SPLASH_MIN_MS)])
+  .then(() => {
+    splash.classList.add('closing');
+    setTimeout(() => splash.classList.add('hidden'), SPLASH_CLOSE_MS);
+  });
 </script>
 
 </body>
