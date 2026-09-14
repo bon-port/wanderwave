@@ -2699,7 +2699,14 @@ function renderTagCloud(){
 
   const showFilter = state.activeTags.size > 0;
   document.getElementById('intensity-filter').style.display = showFilter ? 'block' : 'none';
-  if(showFilter) onIntensityFilterInput(document.getElementById('intensity-filter-slider').value);
+  if(showFilter){
+    onIntensityFilterInput(document.getElementById('intensity-filter-slider').value);
+  } else {
+    // フィルターのスライダーごと隠すので、値も「こだわらない」に戻しておく。
+    // そうしないと、スライダーが見えない状態でも古い上限値が検索結果に
+    // 効き続けてしまう。
+    state.intensityFilter = 100;
+  }
 }
 
 function onIntensityFilterInput(value){
@@ -2965,7 +2972,10 @@ function renderResults(){
       || (m.country && normalizeForSearch(m.country).includes(q))
       || (m.genre && m.genre.some(g => normalizeForSearch(g).includes(q)));
     const matchTags = state.activeTags.size === 0 || [...state.activeTags].every(t => m.tags.includes(t));
-    const matchIntensity = state.activeTags.size === 0 || state.intensityFilter >= 100 || intensityAverage(m) <= riskCategoryUpperBound(state.intensityFilter);
+    // 表現度フィルターは、タグを選んでいるかどうかに関係なく、設定されている
+    // 上限値だけで判定する(以前はactiveTags.size===0の時に無条件で
+    // スルーしてしまい、タグなしの文字検索では上限が一切効かないバグがあった)。
+    const matchIntensity = state.intensityFilter >= 100 || intensityAverage(m) <= riskCategoryUpperBound(state.intensityFilter);
     return matchQuery && matchTags && matchIntensity;
   });
 
@@ -5670,7 +5680,14 @@ function wait(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
 Promise.all([init().catch(err => console.error('初期化に失敗しました', err)), wait(SPLASH_MIN_MS)])
   .then(() => {
     splash.classList.add('closing');
-    setTimeout(() => splash.classList.add('hidden'), SPLASH_CLOSE_MS);
+    setTimeout(() => {
+      splash.classList.add('hidden');
+      // ホーム画面のカードはinit()の中、まだスプラッシュに隠れている間に描画済み
+      // なので、cardFadeInはユーザーに見えないうちに再生し終えてしまっている。
+      // スプラッシュが消えて実際に画面が見えるこのタイミングで作り直し、
+      // フェードインが目に見える形で再生されるようにする。
+      renderHomeRows();
+    }, SPLASH_CLOSE_MS);
   });
 </script>
 
