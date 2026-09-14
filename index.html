@@ -1922,6 +1922,9 @@
       <button class="link-btn diagnosis-history-link" onclick="openDiagnosisHistoryModal()">過去の記憶を見る</button>
 
       <div class="section-label">今、ポケットの中にあるもの</div>
+      <div id="pocket-save-note" class="note" style="display:none; margin-bottom:8px;">
+        これはこの端末に保存されます。消したくない場合は<button class="link-btn" style="display:inline; padding:0; font-size:inherit;" onclick="startEmailLink()">メールを登録</button>してください。
+      </div>
       <div id="pocket-items" class="pocket-grid"></div>
       <button class="ghost-btn" id="pocket-expand-btn" style="width:100%; margin-top:10px; display:none;" onclick="togglePocketExpand()"></button>
 
@@ -5337,6 +5340,10 @@ function renderPocketView(){
   const pocketMovies = getPocketMovies();
 
   renderDiagnosisPicker();
+
+  // ポケットは匿名のままでも使えるが、匿名アカウントはこの端末を離れると
+  // 復帰できないため、メール未確認の間はその旨を控えめに案内する。
+  document.getElementById('pocket-save-note').style.display = isVerifiedUser() ? 'none' : 'block';
 
   // 新しく入れたもの順に並べ、多くなりすぎたら最初は一部だけ見せる(ページが嵩張らないように)
   const sortedPocket = [...pocketMovies].reverse();
