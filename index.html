@@ -1308,11 +1308,19 @@
   .diagnosis-picker-item.selected .diag-pick-check{
     opacity: 1; transform: scale(1);
   }
+  .diagnosis-picker-item .poster-thumb-title{
+    padding: 16px 5px 5px;
+    font-size: 10.5px;
+  }
   .diagnosis-result-movies{
     display:flex; gap:8px; margin-top:12px; flex-wrap:wrap;
   }
   .diagnosis-result-movies .poster-thumb{
     width: 56px; height: 84px; border-radius: 8px;
+  }
+  .diagnosis-result-movies .poster-thumb-title{
+    padding: 12px 4px 4px;
+    font-size: 9px;
   }
   #diagnosis-result.reveal{
     animation: diagnosisReveal 1.6s ease forwards;
@@ -1871,9 +1879,11 @@
           </div>
           <div class="note">確認メールを送ります。メール内のリンクを開くと登録が完了し、ニックネームやレビューなどこれまでのデータはそのまま引き継がれます。別の端末でも、このメールアドレス宛のログインリンクで続きを見られるようになります。</div>
           <div class="form-actions">
-            <button class="primary-btn" onclick="submitEmailLink()">確認メールを送る</button>
+            <button class="primary-btn" id="account-email-submit-btn" onclick="submitEmailLink()">確認メールを送る</button>
             <button class="ghost-btn" onclick="cancelEmailLink()">やめる</button>
           </div>
+          <div class="note" id="account-email-sent" style="display:none; margin-top:8px; color:var(--gold);">✓ 確認メールを送信しました。メール内のリンクを開いて登録を完了してください(数分待っても届かない場合は、迷惑メールフォルダもご確認ください)。</div>
+          <div class="note" id="account-email-error" style="display:none; margin-top:8px; color:#e2647f;"></div>
         </div>
       </div>
     </div>
@@ -2021,9 +2031,10 @@
       <button class="primary-btn" id="magic-login-submit-btn" onclick="submitMagicLogin()">ログインリンクを送る</button>
     </div>
 
-    <div class="note" id="magic-login-sent" style="display:none; margin-top:12px;">
-      メールを送信しました。届いたリンクを開くと、このメールアドレスに登録済みのアカウントでログインできます。
+    <div class="note" id="magic-login-sent" style="display:none; margin-top:12px; color:var(--gold);">
+      ✓ メールを送信しました。届いたリンクを開くと、このメールアドレスに登録済みのアカウントでログインできます(数分待っても届かない場合は、迷惑メールフォルダもご確認ください)。
     </div>
+    <div class="note" id="magic-login-error" style="display:none; margin-top:12px; color:#e2647f;"></div>
   </div>
 
   <!-- ============ MY LOG (movie_logs) FORM VIEW ============ -->
@@ -2122,6 +2133,18 @@
     <div id="list-delete-confirm" style="margin-bottom:14px;"></div>
 
     <div id="list-detail-items" class="pocket-grid"></div>
+  </div>
+
+  <!-- ============ SHARED LIST VIEW(共有リンクから開いた第三者向け・ログイン不要) ============ -->
+  <div class="view" id="view-shared-list">
+    <div class="detail-head">
+      <h2 id="shared-list-name"></h2>
+      <div class="sub" id="shared-list-count"></div>
+    </div>
+    <div id="shared-list-items" class="pocket-grid"></div>
+    <div class="form-actions" style="margin-top:18px;">
+      <button class="primary-btn" onclick="goHome()">Wander_Waveをもっと見る</button>
+    </div>
   </div>
 
   <!-- ============ TERMS VIEW ============ -->
@@ -2564,6 +2587,8 @@ function startEmailLink(){
   const form = document.getElementById('account-email-form');
   if(prompt) prompt.style.display = 'none';
   form.style.display = 'block';
+  document.getElementById('account-email-sent').style.display = 'none';
+  document.getElementById('account-email-error').style.display = 'none';
   // 診断結果など、ページ下の方から呼ばれることもあるのでフォームまでスクロールする
   form.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
@@ -2571,11 +2596,25 @@ function startEmailLink(){
 function cancelEmailLink(){
   document.getElementById('account-email-form').style.display = 'none';
   document.getElementById('account-email-prompt').style.display = 'block';
+  document.getElementById('account-email-sent').style.display = 'none';
+  document.getElementById('account-email-error').style.display = 'none';
 }
 
 async function submitEmailLink(){
   const email = document.getElementById('account-email-input').value.trim();
   if(!email){ showToast('メールアドレスを入力してください'); return; }
+
+  const btn = document.getElementById('account-email-submit-btn');
+  const sentNote = document.getElementById('account-email-sent');
+  const errorNote = document.getElementById('account-email-error');
+  sentNote.style.display = 'none';
+  errorNote.style.display = 'none';
+
+  // 送信には数秒かかることがあり、ボタンを押した直後は見た目に変化が無く
+  // 「送った気がしない」原因になっていたため、送信中であることが分かる表示に切り替える。
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = '送信中…';
 
   try{
     const { error } = await supabase.auth.updateUser(
@@ -2583,8 +2622,8 @@ async function submitEmailLink(){
       { emailRedirectTo: emailAuthRedirectUrl() }
     );
     if(error) throw error;
-    showToast('確認メールを送信しました。メール内のリンクを開いて登録を完了してください');
-    cancelEmailLink();
+    sentNote.style.display = 'block';
+    showToast('確認メールを送信しました');
   }catch(err){
     console.error('メール登録に失敗しました', err);
     // 「すでに登録済み」は、この端末とは別のアカウント(別の端末で以前登録した
@@ -2595,7 +2634,15 @@ async function submitEmailLink(){
       goMagicLogin();
       return;
     }
-    showToast(err && err.message ? err.message : 'メールの登録に失敗しました。アドレスを確認してもう一度お試しください');
+    // GoTrue側のメール送信エラー(SMTP設定・送信制限など)は生の英語メッセージが
+    // 返ってくることが多く、それをそのまま出すと失敗したことに気づきにくいため、
+    // はっきり「失敗しました」と分かる日本語メッセージに置き換える。
+    errorNote.textContent = '✕ 確認メールの送信に失敗しました。時間をおいて再度お試しください。改善しない場合はアドレスをご確認いただくか、他のメールアドレスもお試しください。';
+    errorNote.style.display = 'block';
+    showToast('確認メールの送信に失敗しました');
+  }finally{
+    btn.disabled = false;
+    btn.textContent = originalLabel;
   }
 }
 
@@ -2624,9 +2671,30 @@ async function logout(){
   goHome();
 }
 
+// 「愛を送る」やポケットなど、まだメールに紐付いていないこの端末だけのデータが
+// あるかどうか。ここに当てはまる状態で「ログイン」すると、別の(既存の)
+// アカウントに切り替わってしまい、今のデータは引き継がれないため警告する。
+function currentSessionHasUnlinkedActivity(){
+  if(isVerifiedUser()) return false; // 既にメール確認済みなら、ログインし直しても同じアカウントに戻るだけ
+  if(state.profile) return true; // ニックネーム登録済み(まだメール未登録)
+  if(Object.keys(state.myLove || {}).length > 0) return true; // ハートを送った
+  if((state.myPocket || []).length > 0) return true; // ポケットに何か入れた
+  return false;
+}
+
 function goMagicLogin(){
+  if(currentSessionHasUnlinkedActivity()){
+    const ok = confirm(
+      '今この端末で使っている「愛を送る」やポケットなどの内容は、まだメールアドレスに登録されていません。\n\n' +
+      'ここで別のメールアドレスでログインすると、そちらの(別の)アカウントに切り替わり、今の内容は引き継がれません。\n' +
+      '今の内容を引き継ぎたい場合は、ここではなくプロフィール画面の「メールを追加」から登録してください。\n\n' +
+      'このまま別アカウントでログインしますか?'
+    );
+    if(!ok) return;
+  }
   document.getElementById('magic-login-email').value = '';
   document.getElementById('magic-login-sent').style.display = 'none';
+  document.getElementById('magic-login-error').style.display = 'none';
   switchView('view-magic-login');
   renderMagicLoginTurnstile();
 }
@@ -2636,11 +2704,20 @@ async function submitMagicLogin(){
   if(!email){ showToast('メールアドレスを入力してください'); return; }
   if(!magicLoginTurnstileToken){ showToast('CAPTCHA認証を完了してください'); return; }
 
+  const sentNote = document.getElementById('magic-login-sent');
+  const errorNote = document.getElementById('magic-login-error');
+  sentNote.style.display = 'none';
+  errorNote.style.display = 'none';
+
   // 連打すると同じCAPTCHAトークンで2回リクエストが飛び、Cloudflare側で
   // "timeout-or-duplicate" エラーになって送信できなくなることがあったため、
-  // 送信中はボタンを無効化して二重送信そのものを防ぐ。
+  // 送信中はボタンを無効化して二重送信そのものを防ぐ。送信には数秒かかることが
+  // あり、押した直後に見た目の変化が無いと「送った気がしない」ため、
+  // 送信中であることが分かる表示にも切り替える。
   const btn = document.getElementById('magic-login-submit-btn');
   btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = '送信中…';
 
   try{
     const { error } = await supabase.auth.signInWithOtp({
@@ -2648,15 +2725,19 @@ async function submitMagicLogin(){
       options: { emailRedirectTo: emailAuthRedirectUrl(), captchaToken: magicLoginTurnstileToken }
     });
     if(error) throw error;
-    document.getElementById('magic-login-sent').style.display = 'block';
+    sentNote.style.display = 'block';
+    showToast('ログインリンクを送信しました');
   }catch(err){
     console.error('ログインリンクの送信に失敗しました', err);
-    showToast(err && err.message ? err.message : '送信に失敗しました。アドレスを確認してもう一度お試しください');
+    errorNote.textContent = '✕ ログインリンクの送信に失敗しました。時間をおいて再度お試しください。';
+    errorNote.style.display = 'block';
+    showToast('送信に失敗しました');
   }finally{
     // トークンは1回使い切りのため、成否にかかわらずウィジェットをリセットする
     if(magicLoginTurnstileWidgetId !== null) turnstile.reset(magicLoginTurnstileWidgetId);
     magicLoginTurnstileToken = null;
     btn.disabled = false;
+    btn.textContent = originalLabel;
   }
 }
 
@@ -5278,6 +5359,41 @@ function goListDetail(listId){
   switchView('view-list-detail');
 }
 
+// 「あとで観る」はDBの行を持たない特別なリストなので共有リンクを作れない。
+function buildListShareUrl(listId){
+  return `${window.location.origin}${window.location.pathname}?list=${listId}`;
+}
+
+// 共有リンク(?list=<id>)から開いた第三者向けに、そのリストだけを読み込んで表示する。
+// user_lists/user_list_itemsは本人以外にも読み取りを許可するRLSポリシーが前提。
+async function loadSharedListView(listId){
+  if(!Number.isFinite(listId)) return false;
+  try{
+    const { data: list, error: listErr } = await supabase
+      .from('user_lists')
+      .select('id, name')
+      .eq('id', listId)
+      .single();
+    if(listErr || !list) throw listErr || new Error('list not found');
+
+    const { data: items, error: itemsErr } = await supabase
+      .from('user_list_items')
+      .select('movie_id')
+      .eq('list_id', listId);
+    if(itemsErr) throw itemsErr;
+
+    const movies = (items || []).map(row => MOVIES.find(m => m.id === row.movie_id)).filter(Boolean);
+    document.getElementById('shared-list-name').textContent = list.name;
+    document.getElementById('shared-list-count').textContent = `${movies.length}本の映画`;
+    renderMovieCards(document.getElementById('shared-list-items'), movies, 'このリストにはまだ映画がありません。', { overlayTitle: true });
+    switchView('view-shared-list');
+    return true;
+  }catch(err){
+    console.error('共有リストの読み込みに失敗しました', err);
+    return false;
+  }
+}
+
 function getCurrentList(){
   if(state.currentListId === 'watch_later') return getWatchLaterAsList();
   return state.myLists.find(l => l.id === state.currentListId);
@@ -5492,23 +5608,46 @@ async function shareCurrentList(){
   if(!list) return;
   const movies = list.movieIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
 
+  // 「あとで観る」はDBの行を持たないため、共有リンク(そのリストだけを見せるページ)は作れない。
+  // その場合はリンク無しで従来通りの画像共有のみ行う。
+  const canLink = !list.isBuiltIn;
+  const shareUrl = canLink ? buildListShareUrl(list.id) : null;
+  const shareText = canLink
+    ? `${list.name}\n#Wander_Wave で見つけました\n${shareUrl}`
+    : `${list.name}\n#Wander_Wave で見つけました`;
+
   showToast('画像を作成しています…');
 
   try{ await document.fonts.load("700 46px 'Baloo 2'"); await document.fonts.load("400 42px 'Limelight'"); await document.fonts.load("400 20px 'M PLUS Rounded 1c'"); }catch(e){}
 
   const blob = await generateListImage(list, movies);
-  if(!blob){ showToast('画像の作成に失敗しました'); return; }
+  const file = blob ? new File([blob], `wanderwave_${list.name}.png`, { type: 'image/png' }) : null;
 
-  const file = new File([blob], `wanderwave_${list.name}.png`, { type: 'image/png' });
-
-  if(navigator.share && navigator.canShare && navigator.canShare({ files: [file] })){
-    navigator.share({ files: [file], title: list.name, text: `${list.name}\n#Wander_Wave で見つけました` }).catch(() => {});
-  } else {
-    const url = URL.createObjectURL(blob);
+  // リンクは(対応環境が限られるurlフィールドではなく)textに埋め込んで、共有先が
+  // 画像だけ受け取ってurlを無視する場合でもメッセージとリンクが必ず一緒に渡るようにする。
+  if(file && navigator.share && navigator.canShare && navigator.canShare({ files: [file] })){
+    navigator.share({ files: [file], title: list.name, text: shareText }).catch(() => {});
+    return;
+  }
+  if(navigator.share){
+    navigator.share({ title: list.name, text: shareText }).catch(() => {});
+    return;
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    try{
+      await navigator.clipboard.writeText(shareText);
+      showToast(canLink ? '共有メッセージとリンクをコピーしました' : '共有メッセージをコピーしました');
+      return;
+    }catch(e){ /* コピーに失敗したら下の画像保存にフォールバック */ }
+  }
+  if(file){
+    const url = URL.createObjectURL(file);
     const a = document.createElement('a');
     a.href = url; a.download = `wanderwave_${list.name}.png`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     showToast('画像を保存しました。LINEやSNSに貼り付けられます');
+  } else {
+    showToast('共有に失敗しました');
   }
 }
 
@@ -5707,6 +5846,7 @@ function renderDiagnosisPicker(){
       const isSelected = diagnosisSelection.includes(m.id);
       return `
         <div class="diagnosis-picker-item${isSelected ? ' selected' : ''}" style="background:${m.posterColor};" onclick="toggleDiagnosisPick(${m.id})">
+          <div class="poster-thumb-title">${m.title}</div>
           <div class="diag-pick-check">✓</div>
         </div>
       `;
@@ -5746,7 +5886,9 @@ async function runNewDiagnosis(){
 
   const moviesEl = document.getElementById('new-diagnosis-movies');
   moviesEl.innerHTML = selectedMovies.map(m => `
-    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetail(${m.id})"></div>
+    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetail(${m.id})">
+      <div class="poster-thumb-title">${m.title}</div>
+    </div>
   `).join('');
 
   const recEl = document.getElementById('new-diagnosis-rec');
@@ -5940,6 +6082,14 @@ async function init(){
   renderFeaturedBanner();
   renderHomeRows();
   updateHeader();
+
+  // 共有リンク(?list=<id>)から開かれた場合は、ログイン状態に関わらずそのリストだけを
+  // 表示する。MOVIESの読み込み後(=上のPromise.all後)である必要がある。
+  const sharedListId = new URLSearchParams(window.location.search).get('list');
+  if(sharedListId){
+    const ok = await loadSharedListView(parseInt(sharedListId, 10));
+    if(!ok) showToast('リストが見つかりませんでした');
+  }
 }
 
 // スプラッシュは「固定タイマーで閉じる」のではなく、init()(=データ読み込みと
