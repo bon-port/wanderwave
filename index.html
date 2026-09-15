@@ -317,6 +317,25 @@
     font-weight: 700;
     font-size: 34px; color: rgba(255,255,255,0.85);
     margin-bottom: 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  .poster-thumb-title{
+    position: absolute;
+    left: 0; right: 0; bottom: 0;
+    padding: 22px 8px 7px;
+    font-family:'M PLUS Rounded 1c', sans-serif;
+    font-weight: 600;
+    font-size: 12.5px;
+    line-height: 1.3;
+    color: #fff;
+    text-align: left;
+    background: linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0));
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-shadow: none;
   }
   .result-title{
     font-family:'M PLUS Rounded 1c', sans-serif;
@@ -1570,7 +1589,7 @@
         <div class="intensity-filter-label-row">
           <div class="intensity-filter-label">表現度の上限: <span id="intensity-filter-value">こだわらない</span></div>
         </div>
-        <input type="range" id="intensity-filter-slider" class="risk-slider" min="0" max="100" value="100"
+        <input type="range" id="intensity-filter-slider" class="risk-slider" min="0" max="100" step="25" value="100"
                oninput="onIntensityFilterInput(this.value)">
         <div class="intensity-filter-caption" id="intensity-filter-caption">こだわらず全ての作品を表示します</div>
       </div>
@@ -1687,7 +1706,7 @@
           </div>
           <div id="intensity-slider-wrap" style="position:relative;">
             <input type="range" id="intensity-slider" class="risk-slider" min="0" max="100" value="50"
-                   oninput="onIntensitySliderInput(this.value)" onchange="castIntensity(this.value)">
+                   oninput="onIntensitySliderInput(this.value)">
           </div>
 
           <div class="reason-reveal" id="reason-reveal" style="display:none;">
@@ -1938,7 +1957,6 @@
         <div class="section-label">視聴記録</div>
         <button class="link-btn" onclick="goMyLogForm()">+ 記録を書く</button>
       </div>
-      <div class="sub" style="margin-bottom:14px;">追加した映画・書いたレビュー・視聴ログをまとめた記録です</div>
       <div id="viewing-record-list"></div>
 
       <div class="pocket-divider"></div>
@@ -1964,6 +1982,7 @@
     <div class="profile-links">
       <button class="link-btn" onclick="goTerms()">利用規約・プライバシーポリシー</button>
       <button class="link-btn" onclick="goContact()">お問い合わせ</button>
+      <button class="link-btn" id="logout-btn" style="display:none;" onclick="confirmLogout()">ログアウト</button>
     </div>
   </div>
 
@@ -1986,7 +2005,7 @@
     </div>
 
     <div class="form-actions">
-      <button class="primary-btn" onclick="submitMagicLogin()">ログインリンクを送る</button>
+      <button class="primary-btn" id="magic-login-submit-btn" onclick="submitMagicLogin()">ログインリンクを送る</button>
     </div>
 
     <div class="note" id="magic-login-sent" style="display:none; margin-top:12px;">
@@ -2487,10 +2506,41 @@ async function submitEmailLink(){
     cancelEmailLink();
   }catch(err){
     console.error('メール登録に失敗しました', err);
-    // 既に他のアカウントで確認済みのメールアドレスの場合など、GoTrueのエラー内容を
-    // そのまま出したほうが分かりやすいのでそちらを優先する。
+    // 「すでに登録済み」は、この端末とは別のアカウント(別の端末で以前登録した
+    // ものなど)で使われているメールアドレスという意味。英語のままのGoTrue
+    // エラー文を出すより、ログイン画面へ誘導したほうが親切なので専用に扱う。
+    if(err && /already.*registered/i.test(err.message || '')){
+      showToast('このメールアドレスは別のアカウントで登録済みです。「ログイン」からお入りください');
+      goMagicLogin();
+      return;
+    }
     showToast(err && err.message ? err.message : 'メールの登録に失敗しました。アドレスを確認してもう一度お試しください');
   }
+}
+
+function confirmLogout(){
+  if(!confirm('ログアウトしますか?')) return;
+  logout();
+}
+
+async function logout(){
+  try{
+    await supabase.auth.signOut();
+  }catch(err){
+    console.error('ログアウトに失敗しました', err);
+  }
+  hasSupabaseSession = false;
+  localStorage.removeItem(ONBOARDED_KEY);
+  localStorage.removeItem(AVATAR_CROP_KEY);
+  // このユーザー個人のデータだけをクリアする。MOVIESなど共有データは読み直し不要。
+  state.profile = null;
+  state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
+  state.myLove = {}; state.myIntensity = {}; state.myReason = {}; state.myTagVotes = {};
+  state.myWatchLater = {}; state.myPocket = []; state.myLists = []; state.myLogs = [];
+  state.mySubmittedMovieIds = []; state.mySubmittedMovies = []; state.diagnosisHistory = [];
+  updateHeader();
+  showToast('ログアウトしました');
+  goHome();
 }
 
 function goMagicLogin(){
@@ -2504,6 +2554,12 @@ async function submitMagicLogin(){
   const email = document.getElementById('magic-login-email').value.trim();
   if(!email){ showToast('メールアドレスを入力してください'); return; }
   if(!magicLoginTurnstileToken){ showToast('CAPTCHA認証を完了してください'); return; }
+
+  // 連打すると同じCAPTCHAトークンで2回リクエストが飛び、Cloudflare側で
+  // "timeout-or-duplicate" エラーになって送信できなくなることがあったため、
+  // 送信中はボタンを無効化して二重送信そのものを防ぐ。
+  const btn = document.getElementById('magic-login-submit-btn');
+  btn.disabled = true;
 
   try{
     const { error } = await supabase.auth.signInWithOtp({
@@ -2519,11 +2575,21 @@ async function submitMagicLogin(){
     // トークンは1回使い切りのため、成否にかかわらずウィジェットをリセットする
     if(magicLoginTurnstileWidgetId !== null) turnstile.reset(magicLoginTurnstileWidgetId);
     magicLoginTurnstileToken = null;
+    btn.disabled = false;
   }
 }
 
 // メール確認リンク/マジックリンクを踏んで戻ってきた時にセッションが更新されたら、
-// プロフィールを読み直して画面に反映する
+// プロフィールを読み直して画面に反映する。
+//
+// 注意: SupabaseのJSクライアントは、他アプリに切り替えてからこのタブに
+// 戻ってきた(=visibilitychange)だけでもセッションの再検証を行い、
+// 同じユーザーのままでも'SIGNED_IN'イベントを再度発火することがある。
+// 以前はこのイベントで無条件にgoProfile()していたため、アプリ切り替えから
+// 戻るたびに今見ていた画面がプロフィール画面に強制的に切り替わってしまって
+// いた。本当に新しくサインインした(=ユーザーIDが変わった)時だけ画面遷移する
+// ようにして、この副作用を防ぐ。
+let lastKnownAuthUserId = null;
 supabase.auth.onAuthStateChange((event, session) => {
   hasSupabaseSession = !!session;
   if(event === 'USER_UPDATED'){
@@ -2531,7 +2597,13 @@ supabase.auth.onAuthStateChange((event, session) => {
     renderAccountEmailSection();
   }
   if(event === 'SIGNED_IN'){
-    loadProfile().then(() => { updateHeader(); if(state.profile) goProfile(); });
+    const newUserId = session && session.user ? session.user.id : null;
+    if(newUserId && newUserId !== lastKnownAuthUserId){
+      lastKnownAuthUserId = newUserId;
+      loadProfile().then(() => { updateHeader(); if(state.profile) goProfile(); });
+    } else {
+      lastKnownAuthUserId = newUserId;
+    }
   }
 });
 
@@ -2792,20 +2864,25 @@ function clearSearch(){
 // document.createElement()を使ってほぼ同じマークアップを別途組み立てて
 // おり、片方だけ直すともう片方が古いままになる(実際にそうなっていた)
 // 構造的な原因になっていたため、テンプレートを一本化した。
-function renderMovieCards(root, list, emptyMessage){
+function renderMovieCards(root, list, emptyMessage, opts){
   if(list.length === 0){
     root.innerHTML = `<div class="empty">${emptyMessage}</div>`;
     return;
   }
-  root.innerHTML = list.map(buildCardHTML).join('');
+  root.innerHTML = list.map(m => buildCardHTML(m, opts)).join('');
 }
 
-function buildCardHTML(m){
+// opts.overlayTitle: trueの場合、タイトルを別テキストとしてではなく
+// ポスター画像の上に重ねて表示する(ポケット一覧向け)。
+function buildCardHTML(m, opts){
   const avg = loveDisplayValue(m);
+  const overlayTitle = !!(opts && opts.overlayTitle);
   return `
     <div class="result-card" onclick="goDetail(${m.id})">
-      <div class="poster-thumb" style="background:${m.posterColor}">${m.title.charAt(0)}</div>
-      <div class="result-title">${m.title}</div>
+      <div class="poster-thumb" style="background:${m.posterColor}">${overlayTitle
+        ? `<span class="poster-thumb-initial">${m.title.charAt(0)}</span><div class="poster-thumb-title">${m.title}</div>`
+        : m.title.charAt(0)}</div>
+      ${overlayTitle ? '' : `<div class="result-title">${m.title}</div>`}
       <div class="result-year">${m.year}</div>
       <div class="interest-row">
         <div class="interest-bar-track"><div class="interest-bar-fill" style="width:${(avg/5)*100}%"></div></div>
@@ -2980,6 +3057,36 @@ function normalizeForSearch(s){
   return s.replace(/[・\/／\s　:：!！?？\-]/g, '').toLowerCase();
 }
 
+// 「日本映画」「邦画」のように、製作国名そのものではなく"映画のジャンルとしての
+// 呼び方"で検索された場合にも、製作国が一致する作品を出せるようにする対応表。
+// 同じ考え方を他の国にも広げてある。
+const COUNTRY_QUERY_ALIASES = {
+  "日本": ["日本映画", "邦画", "日本"],
+  "アメリカ": ["アメリカ映画", "米国映画", "ハリウッド映画", "洋画", "アメリカ", "米国"],
+  "イギリス": ["イギリス映画", "英国映画", "イギリス", "英国"],
+  "フランス": ["フランス映画", "フランス"],
+  "韓国": ["韓国映画", "韓流映画", "韓国"],
+  "香港": ["香港映画", "香港"],
+  "中国": ["中国映画", "中国"],
+  "台湾": ["台湾映画", "台湾"],
+  "ドイツ": ["ドイツ映画", "ドイツ"],
+  "イタリア": ["イタリア映画", "イタリア"],
+  "スペイン": ["スペイン映画", "スペイン"],
+  "カナダ": ["カナダ映画", "カナダ"],
+  "オーストラリア": ["オーストラリア映画", "オーストラリア"],
+  "インド": ["インド映画", "ボリウッド映画", "インド"],
+  "タイ": ["タイ映画", "タイ"],
+  "ロシア": ["ロシア映画", "ロシア"]
+};
+
+function matchesCountryAlias(m, normalizedQuery){
+  if(!m.country || !normalizedQuery) return false;
+  return Object.entries(COUNTRY_QUERY_ALIASES).some(([country, aliases]) => {
+    if(!m.country.includes(country)) return false;
+    return aliases.some(alias => normalizedQuery.includes(normalizeForSearch(alias)));
+  });
+}
+
 function renderResults(){
   const root = document.getElementById('results');
   const homeRowsEl = document.getElementById('home-rows');
@@ -3005,7 +3112,9 @@ function renderResults(){
       || (m.cast && m.cast.some(actor => normalizeForSearch(actor).includes(q)))
       || (m.director && normalizeForSearch(m.director).includes(q))
       || (m.country && normalizeForSearch(m.country).includes(q))
-      || (m.genre && m.genre.some(g => normalizeForSearch(g).includes(q)));
+      || (m.genre && m.genre.some(g => normalizeForSearch(g).includes(q)))
+      || (m.synopsis && normalizeForSearch(m.synopsis).includes(q))
+      || matchesCountryAlias(m, q);
     const matchTags = state.activeTags.size === 0 || [...state.activeTags].every(t => m.tags.includes(t));
     // 表現度フィルターは、タグを選んでいるかどうかに関係なく、設定されている
     // 上限値だけで判定する(以前はactiveTags.size===0の時に無条件で
@@ -3144,7 +3253,16 @@ function renderIntensityGauge(m){
   `;
 }
 
-function onIntensitySliderInput(value){
+// 表現度スライダー・「当てはまるもの」タグ・感情タグは、以前はそれぞれ触った
+// 瞬間に個別送信していた(スライダーを離す・チップを押すたびに別々の通信と
+// 「ありがとうございます」が出ていた)。今は、この3つとも「投稿する」を押す
+// までは未送信のローカルな選択状態として保持するだけにし、submitReview()で
+// レビュー本文と一緒に1回でまとめて送信する。
+let pendingIntensityTouched = false;
+let pendingReasonTags = new Set();
+let pendingMoodTags = new Set();
+
+function updateIntensityDisplay(value){
   const color = riskCategoryColor(value);
   const label = document.getElementById('intensity-live-label');
   label.textContent = `${riskLabel(value)}(${value}%)`;
@@ -3153,55 +3271,10 @@ function onIntensitySliderInput(value){
   document.getElementById('reason-reveal').style.display = value > 25 ? 'block' : 'none';
 }
 
-async function castIntensity(value){
-  const m = MOVIES.find(x => x.id === state.currentMovieId);
-
-  if(!state.profile){
-    document.getElementById('intensity-slider').value = state.myIntensity[m.id] || 50;
-    showToast('表現度の投票には、まずニックネームを登録してください');
-    goOnboarding();
-    return;
-  }
-  if(!requireVerifiedUser()){
-    document.getElementById('intensity-slider').value = state.myIntensity[m.id] || 50;
-    return;
-  }
-
-  const { postCount } = computeTrust();
-  if(postCount === 0){
-    document.getElementById('intensity-slider').value = state.myIntensity[m.id] || 50;
-    showToast('表現度の投票には、まずレビューを1件書いてみてください');
-    return;
-  }
-
-  const newVote = parseInt(value, 10);
-  const prev = state.myIntensity[m.id]; // 数値 | undefined
-  const weight = myVoteWeight();
-
-  // サーバー側の集計(movie_review_stats)が信頼できる重み付き平均を持っているので、
-  // ここではUIの見た目をすぐ更新するための概算だけを行う。
-  if(!m.intensityWeight) m.intensityWeight = m.intensityCount || 0;
-  if(prev !== undefined){
-    m.intensitySum -= prev * weight;
-    m.intensityWeight -= weight;
-    m.intensityCount -= 1;
-  }
-  m.intensitySum += newVote * weight;
-  m.intensityWeight += weight;
-  m.intensityCount += 1;
-  state.myIntensity[m.id] = newVote;
-  renderIntensityGauge(m);
-
-  try{
-    await upsertMyReview(m.id, { expression_level: newVote });
-    showToast('評価を反映しました');
-    if(prev === undefined){
-      celebrateSubmission(document.getElementById('intensity-slider-wrap'), 'ありがとうございます');
-    }
-  }catch(err){
-    console.error('表現度の投票に失敗しました', err);
-    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
-  }
+function onIntensitySliderInput(value){
+  updateIntensityDisplay(value);
+  pendingIntensityTouched = true;
+  renderReasonChips(MOVIES.find(x => x.id === state.currentMovieId));
 }
 
 let tagVoteOpen = false;
@@ -3230,67 +3303,26 @@ function toggleTagVote(){
 }
 
 function renderTagVoteChips(){
-  const m = MOVIES.find(x => x.id === state.currentMovieId);
   const el = document.getElementById('tag-vote-select');
-  const myTagVotes = state.myTagVotes[m.id] || [];
   el.innerHTML = ALL_TAGS.map(tag => {
-    const isSelected = myTagVotes.includes(tag);
-    const isDisabled = !isSelected && myTagVotes.length >= 3;
+    const isSelected = pendingMoodTags.has(tag);
+    const isDisabled = !isSelected && pendingMoodTags.size >= 3;
     const color = tagColor(tag);
-    const chip = `<div class="tagchip${isSelected ? ' active' : ''}${isDisabled ? ' disabled' : ''}" style="${isSelected ? `background:${color};border-color:${color};color:#0c0c0e;` : ''}" onclick="castTagVote('${tag}')"><span class="tag-dot" style="background:${color}"></span>${tag}</div>`;
+    const chip = `<div class="tagchip${isSelected ? ' active' : ''}${isDisabled ? ' disabled' : ''}" style="${isSelected ? `background:${color};border-color:${color};color:#0c0c0e;` : ''}" onclick="toggleMoodTag('${tag}')"><span class="tag-dot" style="background:${color}"></span>${tag}</div>`;
     return chip;
-  }).join('') + `<div class="post-block-label" style="width:100%; margin-top:8px;">${myTagVotes.length}/3</div>`;
+  }).join('') + `<div class="post-block-label" style="width:100%; margin-top:8px;">${pendingMoodTags.size}/3</div>`;
 }
 
-async function castTagVote(tag){
-  if(!state.profile){
-    showToast('感情タグへの投票には、まずニックネームを登録してください');
-    goOnboarding();
-    return;
-  }
-  if(!requireVerifiedUser()) return;
-
-  const m = MOVIES.find(x => x.id === state.currentMovieId);
-  if(!m.tagVotes) m.tagVotes = {};
-  if(!state.myTagVotes[m.id]) state.myTagVotes[m.id] = [];
-
-  const myTagVotes = state.myTagVotes[m.id];
-  const idx = myTagVotes.indexOf(tag);
-  const wasSelected = idx !== -1;
-  const isFirstTag = !wasSelected && myTagVotes.length === 0;
-
-  if(wasSelected){
-    myTagVotes.splice(idx, 1);
-    m.tagVotes[tag] = Math.max(0, (m.tagVotes[tag] || 0) - 1);
+// タップした時点ではまだ何も送信しない。選択状態を切り替えるだけで、実際の
+// 送信は「投稿する」を押した時にsubmitReview()がまとめて行う。
+function toggleMoodTag(tag){
+  if(pendingMoodTags.has(tag)){
+    pendingMoodTags.delete(tag);
   } else {
-    if(myTagVotes.length >= 3) return; // 3つまでの上限
-    myTagVotes.push(tag);
-    m.tagVotes[tag] = (m.tagVotes[tag] || 0) + 1;
+    if(pendingMoodTags.size >= 3) return; // 3つまでの上限
+    pendingMoodTags.add(tag);
   }
-
   renderTagVoteChips();
-  renderCommunityTags(m);
-  renderPosterMood(m);
-
-  try{
-    const userId = await currentUserId();
-    const { error } = await supabase
-      .from('movie_tag_votes')
-      .upsert({ movie_id: m.id, user_id: userId, tags: [...myTagVotes] }, { onConflict: 'movie_id,user_id' });
-    if(error) throw error;
-    if(isFirstTag){
-      celebrateSubmission(document.getElementById('tag-vote-block'), 'ありがとうございます');
-    }
-  }catch(err){
-    console.error('感情タグの投票に失敗しました', err);
-    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
-    // 失敗時はローカルの状態を元に戻す
-    if(wasSelected){ myTagVotes.push(tag); m.tagVotes[tag] = (m.tagVotes[tag] || 0) + 1; }
-    else { myTagVotes.splice(myTagVotes.indexOf(tag), 1); m.tagVotes[tag] = Math.max(0, (m.tagVotes[tag] || 0) - 1); }
-    renderTagVoteChips();
-    renderCommunityTags(m);
-    renderPosterMood(m);
-  }
 }
 
 function tagWeights(m){
@@ -3368,60 +3400,19 @@ function renderCommunityTags(m){
 
 function renderReasonChips(m){
   const root = document.getElementById('reason-chip-select');
-  const myReasons = state.myReason[m.id] || [];
   root.innerHTML = Object.keys(REASON_INFO).map(key => {
     const info = REASON_INFO[key];
-    const isSelected = myReasons.includes(key);
-    return `<div class="tagchip${isSelected ? ' active' : ''}" onclick="castReason('${key}')">${info.label}</div>`;
+    const isSelected = pendingReasonTags.has(key);
+    return `<div class="tagchip${isSelected ? ' active' : ''}" onclick="toggleReasonTag('${key}')">${info.label}</div>`;
   }).join('');
 }
 
-async function castReason(key){
-  const m = MOVIES.find(x => x.id === state.currentMovieId);
-
-  if(!state.profile){
-    showToast('この投票には、まずニックネームを登録してください');
-    goOnboarding();
-    return;
-  }
-  if(!requireVerifiedUser()) return;
-
-  const { postCount } = computeTrust();
-  if(postCount === 0){
-    showToast('この投票には、まずレビューを1件書いてみてください');
-    return;
-  }
-
-  if(!m.reasonVotes) m.reasonVotes = { violence: 0, sexual: 0, fear: 0 };
-  if(!state.myReason[m.id]) state.myReason[m.id] = [];
-
-  const myReasons = state.myReason[m.id];
-  const idx = myReasons.indexOf(key);
-  const wasSelected = idx !== -1;
-
-  if(wasSelected){
-    // 選択済みならタップで取り消す
-    myReasons.splice(idx, 1);
-    m.reasonVotes[key] = Math.max(0, m.reasonVotes[key] - 1);
-  } else {
-    myReasons.push(key);
-    m.reasonVotes[key] += 1;
-  }
-
-  renderIntensityGauge(m);
-  renderReasonChips(m);
-
-  try{
-    await upsertMyReview(m.id, { reason_tags: myReasons.length ? [...myReasons] : null });
-  }catch(err){
-    console.error('理由タグの投票に失敗しました', err);
-    showToast(friendlyErrorMessage(err, '投票に失敗しました。通信環境を確認してください。'));
-    // 失敗時はローカルの状態を元に戻す
-    if(wasSelected){ myReasons.push(key); m.reasonVotes[key] += 1; }
-    else { myReasons.splice(myReasons.indexOf(key), 1); m.reasonVotes[key] = Math.max(0, m.reasonVotes[key] - 1); }
-    renderIntensityGauge(m);
-    renderReasonChips(m);
-  }
+// タップした時点ではまだ何も送信しない。選択状態を切り替えるだけで、実際の
+// 送信は「投稿する」を押した時にsubmitReview()がまとめて行う。
+function toggleReasonTag(key){
+  if(pendingReasonTags.has(key)) pendingReasonTags.delete(key);
+  else pendingReasonTags.add(key);
+  renderReasonChips(MOVIES.find(x => x.id === state.currentMovieId));
 }
 
 function updateLoveUI(m){
@@ -3513,12 +3504,15 @@ async function toggleWatchLater(){
 }
 
 async function cycleLove(evt){
+  // 愛を送るのはニックネーム登録だけでできる操作で、メール確認(requireVerifiedUser)
+  // までは求めない。レビュー投稿・映画追加など文章を伴う投稿だけを荒らし対策として
+  // メール確認済みユーザーに絞る設計だったが、ハートのタップにまでその制限がかかって
+  // しまっていたため外す。
   if(!state.profile){
     showToast('愛を送るには、まずニックネームを登録してください');
     goOnboarding();
     return;
   }
-  if(!requireVerifiedUser()) return;
 
   const m = MOVIES.find(x => x.id === state.currentMovieId);
   const prev = state.myLove[m.id] || 0;
@@ -3577,6 +3571,15 @@ async function goDetail(id){
     `<span class="mini-tag" style="color:${tagColor(t)}; background:${tagColor(t)}22;">${t}</span>`
   ).join('');
   updateLoveUI(m);
+
+  // この映画についての「投稿する」パネルの未送信の選択状態を、既に投票済みの
+  // 内容からリセットする(表現度スライダーを一度でも動かしたことがあれば、
+  // 何も触らずに投稿してもその値を保つ扱いにする)。
+  const myPrevVote = state.myIntensity[m.id];
+  pendingIntensityTouched = myPrevVote !== undefined;
+  pendingReasonTags = new Set(state.myReason[m.id] || []);
+  pendingMoodTags = new Set(state.myTagVotes[m.id] || []);
+
   renderIntensityGauge(m);
   renderReasonChips(m);
   renderCommunityTags(m);
@@ -3593,10 +3596,9 @@ async function goDetail(id){
 
   document.getElementById('add-to-list-modal').style.display = 'none';
 
-  const myPrevVote = state.myIntensity[m.id];
   const mySliderVal = myPrevVote !== undefined ? myPrevVote : 50;
   document.getElementById('intensity-slider').value = mySliderVal;
-  onIntensitySliderInput(mySliderVal);
+  updateIntensityDisplay(mySliderVal);
 
   // 配信サービスの表示は一旦停止(内容が頻繁に変わるため、正確なデータ連携ができるまで非表示にする)
   const watchLabel = document.getElementById('d-watch-label');
@@ -3723,6 +3725,7 @@ async function deleteReview(movieId){
     await upsertMyReview(movieId, { review_text: null });
     delete state.hasReviewed[movieId];
     delete state.myReviewsById[movieId];
+    state.myReviewRows = state.myReviewRows.filter(r => r.movieId !== movieId);
     await loadProfile(); // review_countの減少をヘッダーの称号に反映する
     updateHeader();
     showToast('レビューを削除しました');
@@ -3731,6 +3734,14 @@ async function deleteReview(movieId){
     console.error('レビューの削除に失敗しました', err);
     showToast(friendlyErrorMessage(err, '削除に失敗しました。通信環境を確認してください。'));
   }
+}
+
+// 前後の選択状態の差分だけを、コミュニティ集計(m.reasonVotes / m.tagVotes)に反映する。
+// 複数のタグが一度に変わりうる(以前のように1タップ=1通信ではないため)ので、
+// 個別のインクリメントではなくSetの差分から計算する。
+function applySetDelta(counts, prevSet, nextSet){
+  prevSet.forEach(key => { if(!nextSet.has(key)) counts[key] = Math.max(0, (counts[key] || 0) - 1); });
+  nextSet.forEach(key => { if(!prevSet.has(key)) counts[key] = (counts[key] || 0) + 1; });
 }
 
 async function submitReview(force){
@@ -3762,6 +3773,13 @@ async function submitReview(force){
   const m = MOVIES.find(x => x.id === state.currentMovieId);
   const wasEditing = editingMovieId === m.id;
 
+  const prevReasonTags = new Set(state.myReason[m.id] || []);
+  const prevMoodTags = new Set(state.myTagVotes[m.id] || []);
+  const prevIntensity = state.myIntensity[m.id];
+  const newIntensity = pendingIntensityTouched
+    ? parseInt(document.getElementById('intensity-slider').value, 10)
+    : undefined;
+
   try{
     // review_text(自由記述)の投稿だけは、submit-review エッジ関数を経由させ、
     // Cloudflare Turnstileのトークン検証を通過した場合だけ書き込む。
@@ -3784,14 +3802,58 @@ async function submitReview(force){
     state.hasReviewed[m.id] = true;
     state.myReviewsById[m.id] = text;
 
+    // 表現度・当てはまるもの・感情タグは、以前は触るたびに個別送信していたが、
+    // 今はレビュー本文と同じこのタイミングでまとめて1回で送信する。
+    const userId = await currentUserId();
+    const writes = [];
+    if(newIntensity !== undefined){
+      writes.push(upsertMyReview(m.id, { expression_level: newIntensity, reason_tags: [...pendingReasonTags] }));
+    }
+    writes.push(
+      supabase.from('movie_tag_votes')
+        .upsert({ movie_id: m.id, user_id: userId, tags: [...pendingMoodTags] }, { onConflict: 'movie_id,user_id' })
+    );
+    await Promise.all(writes);
+
+    // ローカルの集計値(UIのすぐの見た目用の概算)を反映する
+    if(newIntensity !== undefined){
+      const weight = myVoteWeight();
+      if(!m.intensityWeight) m.intensityWeight = m.intensityCount || 0;
+      if(prevIntensity !== undefined){
+        m.intensitySum -= prevIntensity * weight;
+        m.intensityWeight -= weight;
+        m.intensityCount -= 1;
+      }
+      m.intensitySum += newIntensity * weight;
+      m.intensityWeight += weight;
+      m.intensityCount += 1;
+      state.myIntensity[m.id] = newIntensity;
+
+      if(!m.reasonVotes) m.reasonVotes = { violence: 0, sexual: 0, fear: 0 };
+      applySetDelta(m.reasonVotes, prevReasonTags, pendingReasonTags);
+      state.myReason[m.id] = [...pendingReasonTags];
+      renderIntensityGauge(m);
+    }
+
+    if(!m.tagVotes) m.tagVotes = {};
+    applySetDelta(m.tagVotes, prevMoodTags, pendingMoodTags);
+    state.myTagVotes[m.id] = [...pendingMoodTags];
+    renderCommunityTags(m);
+    renderPosterMood(m);
+    renderTagVoteChips();
+
+    // 視聴記録に、今書いたレビューをその場で反映する(次の全読み込みを待たない)
+    const existingRowIdx = state.myReviewRows.findIndex(r => r.movieId === m.id);
+    if(existingRowIdx !== -1) state.myReviewRows[existingRowIdx] = { ...state.myReviewRows[existingRowIdx], body: text };
+    else state.myReviewRows.push({ movieId: m.id, body: text, createdAt: new Date().toISOString() });
+
     if(wasEditing){
       editingMovieId = null;
       showToast('レビューを更新しました');
-      feedbackSuccess();
     } else {
       showToast(`レビューを投稿しました。${randomThanks()}`);
-      celebrateSubmission(document.getElementById('review-submit-wrap'), 'ありがとうございます');
     }
+    celebrateSubmission(document.getElementById('review-submit-wrap'), 'ありがとうございます');
 
     document.getElementById('review-text').value = "";
     await loadProfile(); // 初めてのレビューならreview_countが増え、称号や表現度投票の可否に反映される
@@ -4555,6 +4617,7 @@ function goProfile(){
     profileEditOpen = false;
     editFormEl.style.display = 'none';
     pocketSectionEl.style.display = 'block';
+    document.getElementById('logout-btn').style.display = 'block';
 
     renderPocketView();
     renderViewingRecord();
@@ -4563,6 +4626,7 @@ function goProfile(){
     summaryEl.style.display = 'none';
     editFormEl.style.display = 'block';
     pocketSectionEl.style.display = 'none';
+    document.getElementById('logout-btn').style.display = 'none';
   }
 
   document.getElementById('profile-magic-login-link').style.display = existing ? 'none' : 'block';
@@ -4630,12 +4694,6 @@ async function loadMyLogs(){
 // 「追加した映画」「書いたレビュー」「視聴ログ」は、これまで別々のリストに
 // 分かれていたが、ユーザーから見ればどれも「自分がWanderでやったこと」の
 // 記録なので、日付順の1本のタイムラインにまとめて表示する。
-const VIEWING_RECORD_BADGE = {
-  added: { label: '追加', color: 'var(--safe)' },
-  review: { label: 'レビュー', color: 'var(--gold)' },
-  log: { label: '視聴ログ', color: '#7fb3d5' }
-};
-
 function buildViewingRecordEntries(){
   const entries = [];
 
@@ -4695,13 +4753,12 @@ function renderViewingRecord(){
   }
 
   root.innerHTML = entries.map(e => {
-    const badge = VIEWING_RECORD_BADGE[e.type];
     const dateLabel = e.date ? new Date(e.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '';
     return `
       <div class="history-item" onclick="${e.onClick}">
         <div class="h-poster" style="background:${e.poster}">${escapeHtml(e.initial)}</div>
         <div style="min-width:0;">
-          <div class="h-title"><span class="mini-tag" style="color:${badge.color}; background:${badge.color}22; margin-right:6px;">${badge.label}</span>${escapeHtml(e.title)}</div>
+          <div class="h-title">${escapeHtml(e.title)}</div>
           <div class="h-sub">${dateLabel ? dateLabel + ' ・ ' : ''}${escapeHtml(e.sub || '')}</div>
         </div>
       </div>
@@ -4960,9 +5017,34 @@ function generateDiagnosis(pocketMovies){
     continuityNote = prev.topTag === topTag
       ? "同一の構造は前回の診断でも観測されており、選択傾向は固定化している。"
       : `前回観測された構造は「${THEME_STRUCTURE[prev.topTag] || prev.topTag}」であり、今回は別の構造に置き換わっている。`;
+  } else {
+    continuityNote = "継続的な観測記録はまだ蓄積されていないが、今回の選択が次の基準点になる。";
   }
 
-  const body = `選ばれた5本に共通するのは、${themeNoun}という構造である。ジャンルの差異は表層に過ぎず、${topTagCount}本がこの構造を共有していた。${intensityNote}あなたはこの作品群を手元に置くことで、${themeNoun}を、映画という装置を通じて継続的に摂取している。${continuityNote}`;
+  let secondaryNote;
+  if(secondTag && secondTag !== topTag){
+    const secondThemeNoun = THEME_STRUCTURE[secondTag] || "未分類の構造";
+    secondaryNote = `副次的には、${secondThemeNoun}という傾向も観測される。これは主たる構造を打ち消すものではなく、むしろ補強する形で共存している。`;
+  } else {
+    secondaryNote = "副次的な構造は観測されず、単一の傾向へと収束している選択だった。";
+  }
+
+  const uniqueTagCount = new Set(pocketMovies.flatMap(m => m.tags)).size;
+  const diversityNote = uniqueTagCount <= 3
+    ? "感情の幅は狭く絞り込まれており、これは単なる好みというより一種の指向性として機能している。"
+    : uniqueTagCount <= 6
+    ? "感情の幅にはある程度の広がりが見られるが、軸となる構造は一貫している。"
+    : "感情の幅は広く、複数の欲求が並行して満たされようとしている。";
+
+  const body = [
+    `選ばれた5本に共通するのは、${themeNoun}という構造である。ジャンルの差異は表層に過ぎず、${topTagCount}本がこの構造を共有していた。`,
+    intensityNote,
+    secondaryNote,
+    diversityNote,
+    `あなたはこの作品群を手元に置くことで、${themeNoun}を、映画という装置を通じて継続的に摂取している。`,
+    continuityNote,
+    "次にポケットへ加える一本が、この構造を強化するのか、あるいは崩すのかもまた、記録として残り続ける。"
+  ].join('\n');
 
   // 今のあなたへのおすすめ(選んでいない、傾向が近い作品)
   const pickedIds = pocketMovies.map(m => m.id);
@@ -5483,7 +5565,7 @@ function renderPocketView(){
   const visiblePocket = showAll ? sortedPocket : sortedPocket.slice(0, POCKET_PREVIEW_LIMIT);
 
   const itemsRoot = document.getElementById('pocket-items');
-  renderMovieCards(itemsRoot, visiblePocket, 'まだ何もありません。「リストに追加」から「ポケットに入れる」を選ぶと、ここに集まってきます。');
+  renderMovieCards(itemsRoot, visiblePocket, '', { overlayTitle: true });
 
   const expandBtn = document.getElementById('pocket-expand-btn');
   if(sortedPocket.length > POCKET_PREVIEW_LIMIT){
