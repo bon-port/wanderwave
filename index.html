@@ -1936,6 +1936,8 @@
 
       <div id="diagnosis-picker" class="diagnosis-picker"></div>
 
+      <div id="diagnosis-cooldown-note" class="sub" style="display:none; margin-top:8px;"></div>
+
       <button class="primary-btn diagnosis-run-btn-prominent" id="diagnosis-run-btn" style="width:100%; margin-top:14px;" onclick="runNewDiagnosis()" disabled>診断する</button>
 
       <div id="diagnosis-result" class="pocket-diagnosis" style="display:none;">
@@ -5584,14 +5586,41 @@ function togglePocketExpand(){
 }
 
 const DIAGNOSIS_MAX_PICK = 5;
+const DIAGNOSIS_COOLDOWN_DAYS = 30;
 let diagnosisSelection = [];
+
+// 直近の診断からDIAGNOSIS_COOLDOWN_DAYS日経っていなければ、残り日数(切り上げ)を返す。
+// 経過していれば0。診断履歴が無い(=一度も診断していない、または未確認ユーザーで
+// 履歴が保存されていない)場合も0。
+function diagnosisCooldownRemainingDays(){
+  const history = state.diagnosisHistory || [];
+  const prev = history[0];
+  if(!prev || !prev.date) return 0;
+  const elapsedDays = (Date.now() - new Date(prev.date).getTime()) / (1000 * 60 * 60 * 24);
+  const remaining = Math.ceil(DIAGNOSIS_COOLDOWN_DAYS - elapsedDays);
+  return remaining > 0 ? remaining : 0;
+}
 
 function renderDiagnosisPicker(){
   const root = document.getElementById('diagnosis-picker');
+  const runBtn = document.getElementById('diagnosis-run-btn');
+  const cooldownNote = document.getElementById('diagnosis-cooldown-note');
   const pocketMovies = [...getPocketMovies()].reverse();
 
   // ポケットから消えた作品は選択からも外す
   diagnosisSelection = diagnosisSelection.filter(id => pocketMovies.some(m => m.id === id));
+
+  const remainingDays = diagnosisCooldownRemainingDays();
+  if(remainingDays > 0){
+    root.style.display = 'none';
+    runBtn.style.display = 'none';
+    cooldownNote.style.display = 'block';
+    cooldownNote.textContent = `5本での診断は1ヶ月に1回までです。あと${remainingDays}日で次の診断ができます。`;
+    return;
+  }
+  root.style.display = '';
+  runBtn.style.display = '';
+  cooldownNote.style.display = 'none';
 
   if(pocketMovies.length === 0){
     root.innerHTML = `<div class="empty" style="grid-column: 1 / -1;">ポケットに何か入れると、ここから選んで診断できます。</div>`;
@@ -5606,12 +5635,12 @@ function renderDiagnosisPicker(){
     }).join('');
   }
 
-  const runBtn = document.getElementById('diagnosis-run-btn');
   runBtn.disabled = diagnosisSelection.length !== DIAGNOSIS_MAX_PICK;
   runBtn.textContent = diagnosisSelection.length > 0 ? `診断する(${diagnosisSelection.length}/${DIAGNOSIS_MAX_PICK})` : `診断する`;
 }
 
 function toggleDiagnosisPick(id){
+  if(diagnosisCooldownRemainingDays() > 0) return;
   const idx = diagnosisSelection.indexOf(id);
   if(idx !== -1){
     diagnosisSelection.splice(idx, 1);
@@ -5630,6 +5659,7 @@ function toggleDiagnosisPick(id){
 
 async function runNewDiagnosis(){
   if(diagnosisSelection.length !== DIAGNOSIS_MAX_PICK) return;
+  if(diagnosisCooldownRemainingDays() > 0) return;
   const selectedMovies = diagnosisSelection.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
   const diagnosis = generateDiagnosis(selectedMovies);
 
