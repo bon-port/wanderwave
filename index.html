@@ -946,6 +946,13 @@
        しまい、.hiddenが先に付いてアニメーションが再生されないまま消えていた
        (発生していたバグの原因)。 */
     animation: irisClose 0.6s cubic-bezier(.65,0,.35,1) forwards;
+    /* .splashは入場時に opacity:0 → splashFadeInで1 に上げているが、.closingで
+       animationをirisCloseに差し替えると、その瞬間にforwardsで保持されていた
+       opacity:1が失われ、素の(アニメーションを無視した)opacity:0が復活して
+       画面が即座に見えなくなっていた。これが「消えるモーションが見えない」の
+       正体で、irisClose自体はopacityに触れないため誰も1に戻してくれなかった。
+       ここで明示的に1を指定し、閉じるアニメーションの間ずっと見える状態を保つ。 */
+    opacity: 1;
   }
   @keyframes irisClose{
     to{ clip-path: circle(0% at 50% 50%); }
@@ -1007,6 +1014,10 @@
   .splash.closing .splash-logo,
   .splash.closing .splash-tag{
     animation: fadeOutUp 0.4s ease forwards;
+    /* .splash-tagも同じ理由(静的なopacity:0がfadeInのforwardsを上書きする)で
+       アニメーションを差し替えた瞬間にopacity:0からopacity:0への変化なし、
+       という無音のアニメーションになっていた。ここでも明示的に1から始める。 */
+    opacity: 1;
   }
   @keyframes fadeOutUp{ to{ opacity:0; transform: translateY(-10px); } }
   .splash.hidden{ display:none; }
@@ -1788,10 +1799,10 @@
       </div>
     </div>
 
-    <div class="form-actions" style="margin-top:20px;">
-      <button class="primary-btn" onclick="goProfile()">はじめる</button>
+    <div class="form-actions" style="margin-top:20px; flex-direction:column;">
+      <button class="primary-btn" onclick="goProfile()">新規登録してはじめる</button>
+      <button class="ghost-btn" onclick="goMagicLogin()">ログイン(登録済みの方はこちら)</button>
     </div>
-    <button class="link-btn" style="margin-top:10px; width:100%;" onclick="goMagicLogin()">すでにメールを登録済みの方はこちら(メールでログイン)</button>
   </div>
 
   <!-- ============ PROFILE / REGISTER VIEW ============ -->
@@ -1921,6 +1932,17 @@
 
       <button class="link-btn diagnosis-history-link" onclick="openDiagnosisHistoryModal()">過去の記憶を見る</button>
 
+      <div class="pocket-divider"></div>
+
+      <div class="section-label-row">
+        <div class="section-label">視聴記録</div>
+        <button class="link-btn" onclick="goMyLogForm()">+ 記録を書く</button>
+      </div>
+      <div class="sub" style="margin-bottom:14px;">追加した映画・書いたレビュー・視聴ログをまとめた記録です</div>
+      <div id="viewing-record-list"></div>
+
+      <div class="pocket-divider"></div>
+
       <div class="section-label">今、ポケットの中にあるもの</div>
       <div id="pocket-save-note" class="note" style="display:none; margin-bottom:8px;">
         これはこの端末に保存されます。消したくない場合は<button class="link-btn" style="display:inline; padding:0; font-size:inherit;" onclick="startEmailLink()">メールを登録</button>してください。
@@ -1937,25 +1959,6 @@
       <div id="pocket-lists-grid" class="lists-grid"></div>
       <div id="pocket-new-list-form" style="margin-top:10px;"></div>
 
-      <div class="pocket-divider"></div>
-
-      <div class="section-label">投稿履歴</div>
-      <div class="sub" style="margin-bottom:14px;">これまでにあなたが投稿した内容の一覧です</div>
-
-      <div class="post-block-label">追加した映画</div>
-      <div id="history-movies"></div>
-
-      <div class="post-block-label" style="margin-top:16px;">書いたレビュー</div>
-      <div id="history-reviews"></div>
-
-      <div class="pocket-divider"></div>
-
-      <div class="section-label-row">
-        <div class="section-label">視聴ログ</div>
-        <button class="link-btn" onclick="goMyLogForm()">+ ログを書く</button>
-      </div>
-      <div class="sub" style="margin-bottom:14px;">観た映画の記録。あなただけが見られます</div>
-      <div id="mylog-list"></div>
     </div>
 
     <div class="profile-links">
@@ -1975,6 +1978,11 @@
     <div class="field">
       <label>メールアドレス</label>
       <input class="field-input" id="magic-login-email" type="email" placeholder="例: you@example.com">
+    </div>
+
+    <div class="field">
+      <label>認証</label>
+      <div id="magic-login-turnstile-widget"></div>
     </div>
 
     <div class="form-actions">
@@ -2351,6 +2359,42 @@ function renderAddMovieTurnstile(retriesLeft){
   });
 }
 
+// マジックリンクログイン用のTurnstileウィジェット。goMagicLogin()で画面を開くたびに呼ぶ。
+// (このトークンをsignInWithOtp()に渡さずにいたため、プロジェクト側のCAPTCHA保護に
+// よってログインリクエストが常にcaptcha_failedで弾かれ、「登録はできてもログイン
+// ができない」状態になっていた。新規登録・レビュー投稿・映画追加と同じ仕組みに揃える)
+let magicLoginTurnstileWidgetId = null;
+let magicLoginTurnstileToken = null;
+
+function renderMagicLoginTurnstile(retriesLeft){
+  if(retriesLeft === undefined) retriesLeft = 25;
+  magicLoginTurnstileToken = null;
+
+  if(typeof turnstile === 'undefined'){
+    if(retriesLeft <= 0){
+      console.error('Turnstileの読み込みに失敗しました');
+      return;
+    }
+    setTimeout(() => renderMagicLoginTurnstile(retriesLeft - 1), 200);
+    return;
+  }
+
+  const container = document.getElementById('magic-login-turnstile-widget');
+  if(!container) return;
+
+  if(magicLoginTurnstileWidgetId !== null){
+    turnstile.reset(magicLoginTurnstileWidgetId);
+    return;
+  }
+
+  magicLoginTurnstileWidgetId = turnstile.render(container, {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: (token) => { magicLoginTurnstileToken = token; },
+    'expired-callback': () => { magicLoginTurnstileToken = null; },
+    'error-callback': () => { magicLoginTurnstileToken = null; }
+  });
+}
+
 // CAPTCHAトークンを添えて匿名サインインする。既にセッションがあれば何もしない。
 // 戻り値: サインイン(または既存セッションの利用)に成功したらtrue
 async function signInAnonymouslyWithCaptcha(){
@@ -2453,22 +2497,28 @@ function goMagicLogin(){
   document.getElementById('magic-login-email').value = '';
   document.getElementById('magic-login-sent').style.display = 'none';
   switchView('view-magic-login');
+  renderMagicLoginTurnstile();
 }
 
 async function submitMagicLogin(){
   const email = document.getElementById('magic-login-email').value.trim();
   if(!email){ showToast('メールアドレスを入力してください'); return; }
+  if(!magicLoginTurnstileToken){ showToast('CAPTCHA認証を完了してください'); return; }
 
   try{
     const { error } = await supabase.auth.signInWithOtp({
       email,
-      options: { emailRedirectTo: emailAuthRedirectUrl() }
+      options: { emailRedirectTo: emailAuthRedirectUrl(), captchaToken: magicLoginTurnstileToken }
     });
     if(error) throw error;
     document.getElementById('magic-login-sent').style.display = 'block';
   }catch(err){
     console.error('ログインリンクの送信に失敗しました', err);
-    showToast('送信に失敗しました。アドレスを確認してもう一度お試しください');
+    showToast(err && err.message ? err.message : '送信に失敗しました。アドレスを確認してもう一度お試しください');
+  }finally{
+    // トークンは1回使い切りのため、成否にかかわらずウィジェットをリセットする
+    if(magicLoginTurnstileWidgetId !== null) turnstile.reset(magicLoginTurnstileWidgetId);
+    magicLoginTurnstileToken = null;
   }
 }
 
@@ -2641,7 +2691,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, diagnosisHistory: [] };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], mySubmittedMovies: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, diagnosisHistory: [] };
 
 
 function riskLabel(v){
@@ -4031,17 +4081,17 @@ async function loadMyReviews(){
     const userId = await currentUserId();
     if(!userId){
       state.myLove = {}; state.myIntensity = {}; state.myReason = {};
-      state.hasReviewed = {}; state.myReviewsById = {};
+      state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
       return;
     }
     const { data, error } = await supabase
       .from('movie_reviews')
-      .select('movie_id, love_level, expression_level, reason_tags, review_text')
+      .select('movie_id, love_level, expression_level, reason_tags, review_text, created_at')
       .eq('user_id', userId);
     if(error) throw error;
 
     state.myLove = {}; state.myIntensity = {}; state.myReason = {};
-    state.hasReviewed = {}; state.myReviewsById = {};
+    state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
 
     (data || []).forEach(row => {
       if(row.love_level) state.myLove[row.movie_id] = row.love_level;
@@ -4050,12 +4100,14 @@ async function loadMyReviews(){
       if(row.review_text){
         state.hasReviewed[row.movie_id] = true;
         state.myReviewsById[row.movie_id] = row.review_text;
+        // 視聴記録(診断の下の統合タイムライン)用に、日付つきでそのまま保持しておく
+        state.myReviewRows.push({ movieId: row.movie_id, body: row.review_text, createdAt: row.created_at });
       }
     });
   }catch(err){
     console.error('自分の投票の読み込みに失敗しました', err);
     state.myLove = {}; state.myIntensity = {}; state.myReason = {};
-    state.hasReviewed = {}; state.myReviewsById = {};
+    state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
   }
 }
 
@@ -4209,13 +4261,15 @@ async function loadProfile(){
 async function loadMySubmittedMovies(){
   try{
     const userId = await currentUserId();
-    if(!userId){ state.mySubmittedMovieIds = []; return; }
-    const { data, error } = await supabase.from('movies').select('id').eq('added_by', userId);
+    if(!userId){ state.mySubmittedMovieIds = []; state.mySubmittedMovies = []; return; }
+    const { data, error } = await supabase.from('movies').select('id, created_at').eq('added_by', userId);
     if(error) throw error;
     state.mySubmittedMovieIds = (data || []).map(row => row.id);
+    state.mySubmittedMovies = data || [];
   }catch(err){
     console.error(err);
     state.mySubmittedMovieIds = [];
+    state.mySubmittedMovies = [];
   }
 }
 
@@ -4503,8 +4557,7 @@ function goProfile(){
     pocketSectionEl.style.display = 'block';
 
     renderPocketView();
-    renderHistory();
-    renderMyLogList();
+    renderViewingRecord();
     renderAccountEmailSection();
   } else {
     summaryEl.style.display = 'none';
@@ -4573,21 +4626,83 @@ async function loadMyLogs(){
   }
 }
 
-function renderMyLogList(){
-  const root = document.getElementById('mylog-list');
+// --- 視聴記録(診断のすぐ下にある統合タイムライン) -----------------------
+// 「追加した映画」「書いたレビュー」「視聴ログ」は、これまで別々のリストに
+// 分かれていたが、ユーザーから見ればどれも「自分がWanderでやったこと」の
+// 記録なので、日付順の1本のタイムラインにまとめて表示する。
+const VIEWING_RECORD_BADGE = {
+  added: { label: '追加', color: 'var(--safe)' },
+  review: { label: 'レビュー', color: 'var(--gold)' },
+  log: { label: '視聴ログ', color: '#7fb3d5' }
+};
+
+function buildViewingRecordEntries(){
+  const entries = [];
+
+  state.mySubmittedMovies.forEach(row => {
+    const m = MOVIES.find(x => x.id === row.id);
+    if(!m) return;
+    entries.push({
+      type: 'added',
+      date: row.created_at,
+      onClick: `goDetail(${m.id})`,
+      poster: m.posterColor,
+      initial: m.title.charAt(0),
+      title: m.title,
+      sub: `${m.year}年 ・ ${loveDisplayValue(m).toFixed(1)}の愛度`
+    });
+  });
+
+  state.myReviewRows.forEach(row => {
+    const m = MOVIES.find(x => x.id === row.movieId);
+    if(!m) return;
+    entries.push({
+      type: 'review',
+      date: row.createdAt,
+      onClick: `goDetail(${m.id})`,
+      poster: m.posterColor,
+      initial: m.title.charAt(0),
+      title: m.title,
+      sub: row.body
+    });
+  });
+
+  state.myLogs.forEach(log => {
+    const firstTag = (log.tags || '').split(',').filter(Boolean)[0];
+    entries.push({
+      type: 'log',
+      date: log.created_at,
+      onClick: `goMyLogForm(${log.id})`,
+      poster: firstTag ? tagColor(firstTag) : '#3a3a40',
+      initial: (log.movie_title || '?').charAt(0),
+      title: log.movie_title || '(無題)',
+      sub: log.review_text || log.tags || '感想なし'
+    });
+  });
+
+  entries.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+  return entries;
+}
+
+function renderViewingRecord(){
+  const root = document.getElementById('viewing-record-list');
   if(!root) return;
-  if(!state.myLogs.length){
-    root.innerHTML = '<div class="empty" style="padding:16px 0;">まだ視聴ログがありません。</div>';
+
+  const entries = buildViewingRecordEntries();
+  if(!entries.length){
+    root.innerHTML = '<div class="empty" style="padding:16px 0;">まだ記録がありません。映画を追加したり、レビューや視聴ログを書くとここに積み重なっていきます。</div>';
     return;
   }
-  root.innerHTML = state.myLogs.map(log => {
-    const firstTag = (log.tags || '').split(',').filter(Boolean)[0];
+
+  root.innerHTML = entries.map(e => {
+    const badge = VIEWING_RECORD_BADGE[e.type];
+    const dateLabel = e.date ? new Date(e.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '';
     return `
-      <div class="history-item" onclick="goMyLogForm(${log.id})">
-        <div class="h-poster" style="background:${firstTag ? tagColor(firstTag) : '#3a3a40'}">${(log.movie_title || '?').charAt(0)}</div>
-        <div>
-          <div class="h-title">${log.movie_title}</div>
-          <div class="h-sub">${log.review_text || log.tags || '感想なし'}</div>
+      <div class="history-item" onclick="${e.onClick}">
+        <div class="h-poster" style="background:${e.poster}">${escapeHtml(e.initial)}</div>
+        <div style="min-width:0;">
+          <div class="h-title"><span class="mini-tag" style="color:${badge.color}; background:${badge.color}22; margin-right:6px;">${badge.label}</span>${escapeHtml(e.title)}</div>
+          <div class="h-sub">${dateLabel ? dateLabel + ' ・ ' : ''}${escapeHtml(e.sub || '')}</div>
         </div>
       </div>
     `;
@@ -4710,7 +4825,6 @@ async function saveMyLog(){
       feedbackSuccess();
     }
     await loadMyLogs();
-    renderMyLogList();
     goProfile();
   }catch(err){
     console.error(err);
@@ -4727,7 +4841,6 @@ async function deleteMyLogConfirm(){
     if(error) throw error;
     showToast('視聴ログを削除しました');
     await loadMyLogs();
-    renderMyLogList();
     goProfile();
   }catch(err){
     console.error(err);
@@ -5568,48 +5681,6 @@ function deleteDiagnosisHistoryItem(id){
       renderDiagnosisHistoryList();
     }
   }, 280);
-}
-
-function renderHistory(){
-  const movieRoot = document.getElementById('history-movies');
-  const reviewRoot = document.getElementById('history-reviews');
-
-  const submitted = state.mySubmittedMovieIds
-    .map(id => MOVIES.find(m => m.id === id))
-    .filter(Boolean);
-
-  movieRoot.innerHTML = submitted.length
-    ? submitted.map(m => `
-        <div class="history-item" onclick="goDetail(${m.id})">
-          <div class="h-poster" style="background:${m.posterColor}">${m.title.charAt(0)}</div>
-          <div>
-            <div class="h-title">${m.title}</div>
-            <div class="h-sub">${m.year}年 ・ ${loveDisplayValue(m).toFixed(1)}の愛度</div>
-          </div>
-        </div>
-      `).join('')
-    : '<div class="empty" style="padding:16px 0;">まだ映画を追加していません。</div>';
-
-  const reviewedIds = Object.keys(state.hasReviewed).map(Number);
-  const reviewed = reviewedIds
-    .map(id => {
-      const m = MOVIES.find(x => x.id === id);
-      const body = state.myReviewsById[id];
-      return (m && body) ? { m, body } : null;
-    })
-    .filter(Boolean);
-
-  reviewRoot.innerHTML = reviewed.length
-    ? reviewed.map(({m, body}) => `
-        <div class="history-item" onclick="goDetail(${m.id})">
-          <div class="h-poster" style="background:${m.posterColor}">${m.title.charAt(0)}</div>
-          <div>
-            <div class="h-title">${m.title}</div>
-            <div class="h-sub">${body}</div>
-          </div>
-        </div>
-      `).join('')
-    : '<div class="empty" style="padding:16px 0;">まだレビューを書いていません。</div>';
 }
 
 let contactCategory = "バグ報告";
