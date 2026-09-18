@@ -99,6 +99,19 @@ function normalizeTitle(t: string): string {
   return (t || "").trim().toLowerCase();
 }
 
+// ホームの「今話題の新作」棚は、日本で未公開の作品が紛れ込むと不自然になるため、
+// TMDbのrelease_datesからJP国の公開日(最も早いもの)を取り出しておく。
+// JPのエントリが無ければ日本未公開とみなしnullのままにする。
+function extractJapanReleaseDate(releaseDatesResults: any[]): string | null {
+  const jp = releaseDatesResults.find((r: any) => r.iso_3166_1 === "JP");
+  if (!jp || !jp.release_dates?.length) return null;
+  const dates = jp.release_dates
+    .map((rd: any) => rd.release_date)
+    .filter(Boolean)
+    .sort();
+  return dates.length ? dates[0].slice(0, 10) : null;
+}
+
 // SupabaseのREST APIは1回のリクエストで最大1000行までしか返さない。moviesが
 // 1000本を超えた状態で.range()無しにselectすると、重複チェック用の一覧が
 // 黙って切り詰められ、既存作品を見落として重複行を挿入してしまう
@@ -165,9 +178,10 @@ Deno.serve(async (req: Request) => {
       const chunk = fresh.slice(i, i + CONCURRENCY);
       const chunkRows = await Promise.all(
         chunk.map(async (c: any) => {
-          const [details, credits] = await Promise.all([
+          const [details, credits, releaseDates] = await Promise.all([
             tmdbFetch(`/movie/${c.id}`, { language: "ja-JP" }),
             tmdbFetch(`/movie/${c.id}/credits`, { language: "ja-JP" }),
+            tmdbFetch(`/movie/${c.id}/release_dates`, {}),
           ]);
           if (!details) return null;
 
@@ -183,6 +197,7 @@ Deno.serve(async (req: Request) => {
           const countries = (details.production_countries || []).map((co: any) => countryNameJa(co.iso_3166_1, co.name));
           const year = details.release_date ? parseInt(String(details.release_date).slice(0, 4), 10) : null;
           const synopsis = (details.overview || "").slice(0, SYNOPSIS_MAX_LEN);
+          const japanReleaseDate = extractJapanReleaseDate(releaseDates?.results || []);
 
           return {
             title: details.title || c.title,
@@ -194,6 +209,8 @@ Deno.serve(async (req: Request) => {
             country: countries.join("・") || null,
             synopsis: synopsis || null,
             poster_path: details.poster_path || null,
+            japan_release_date: japanReleaseDate,
+            japan_release_checked_at: new Date().toISOString(),
             tmdb_id: c.id,
             tmdb_vote_count: c.vote_count,
             tmdb_vote_average: c.vote_average,

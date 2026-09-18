@@ -3002,7 +3002,11 @@ function renderHomeRows(){
     `;
   });
 
-  const newReleases = [...MOVIES].sort((a, b) => (b.year - a.year) || (b.id - a.id)).slice(0, 6);
+  // 「今話題の新作」は日本で未公開の作品が混ざると不自然なので、
+  // 日本公開日が判明している作品(japanReleaseDate)だけを対象に、公開日が新しい順に選ぶ。
+  const newReleases = MOVIES.filter(m => m.japanReleaseDate)
+    .sort((a, b) => b.japanReleaseDate.localeCompare(a.japanReleaseDate) || (b.id - a.id))
+    .slice(0, 6);
   if(newReleases.length){
     html += `
       <div class="section-label">今話題の新作</div>
@@ -4201,7 +4205,7 @@ async function selectAllRows(table, columns){
 async function loadMovies(){
   try{
     const [moviesData, statsRes, estimatesData] = await Promise.all([
-      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path'),
+      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path, japan_release_date'),
       supabase.from('movie_review_stats').select('*'),
       selectAllRows('movie_expression_estimates', 'movie_id, expression_level, reason_tags')
     ]);
@@ -4236,6 +4240,7 @@ async function loadMovies(){
         posterColor: POSTER_PALETTE[row.id % POSTER_PALETTE.length],
         posterUrl: row.poster_path ? `${TMDB_IMAGE_BASE}${row.poster_path}` : null,
         posterPath: row.poster_path || null,
+        japanReleaseDate: row.japan_release_date || null,
         platforms: [],
         tagVotes: {},
         reviews: [],
