@@ -409,6 +409,20 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  .review-feed-marquee{
+    margin-top: 22px;
+    overflow: hidden;
+  }
+  .review-feed-track{
+    display: flex; gap: 16px;
+    width: max-content;
+    animation: reviewFeedScroll 45s linear infinite;
+  }
+  .review-feed-track:hover{ animation-play-state: paused; }
+  @keyframes reviewFeedScroll{
+    from{ transform: translateX(0); }
+    to{ transform: translateX(-50%); }
+  }
   .poster-thumb{
     width: 148px; height: 210px;
     border-radius: 12px;
@@ -3301,9 +3315,15 @@ function renderHomeRows(){
     .slice(0, 20);
 
   if(reviewCards.length){
+    // 手でスワイプする他の棚と違い、ここは常に自動で流れ続ける演出にする。
+    // シームレスにループさせるため、カード列を2回連続で並べてから
+    // ちょうど半分ぶん(=1周ぶん)だけスライドさせる。
+    const cardsHtml = reviewCards.join('');
     html += `
       <div class="section-label">みんなの声</div>
-      <div class="results">${reviewCards.join('')}</div>
+      <div class="review-feed-marquee">
+        <div class="review-feed-track">${cardsHtml}${cardsHtml}</div>
+      </div>
     `;
   }
 
