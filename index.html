@@ -2295,13 +2295,21 @@ function withTimeout(promise, ms){
   ]);
 }
 
+// getSession()がタイムアウト/エラーになった場合は「本当にセッションが無い」のか
+// 「確認できなかっただけ」なのか区別がつかない。区別せずfalse扱いにすると、
+// 実際にはセッションがある(=登録済み)状態でも自動匿名サインインが走って
+// 上書きしてしまう事故になるため、この2つを別のフラグで持つ。
+let sessionCheckFailed = false;
+
 async function checkExistingSession(){
   try{
     const { data: { session } } = await withTimeout(supabase.auth.getSession(), 6000);
     hasSupabaseSession = !!session;
+    sessionCheckFailed = false;
   }catch(err){
     console.error('セッション確認に失敗しました', err);
     hasSupabaseSession = false;
+    sessionCheckFailed = true;
   }
   return hasSupabaseSession;
 }
@@ -2589,7 +2597,18 @@ supabase.auth.onAuthStateChange((event, session) => {
     const newUserId = session && session.user ? session.user.id : null;
     if(newUserId && newUserId !== lastKnownAuthUserId){
       lastKnownAuthUserId = newUserId;
-      loadProfile().then(() => { updateHeader(); if(state.profile) goProfile(); });
+      // supabase-jsの既知の不具合により、onAuthStateChangeのコールバック内で
+      // 同期的にSupabaseのAPI呼び出し(loadProfile内のgetUser/select)を行うと、
+      // それ以降そのクライアントで行う全てのSupabase呼び出しがデッドロックして
+      // 二度と返ってこなくなることがある
+      // (https://github.com/supabase/gotrue-js/issues/762)。
+      // これが原因で、セッションが正常に存在するのにgetSession()がハングし、
+      // タイムアウト経由で「セッション無し」と誤判定→自動匿名サインインが
+      // 走って新規登録したはずのアカウントがゲスト扱いになる事故が起きていた。
+      // setTimeoutでコールバックの外の別タスクに逃がすことでデッドロックを回避する。
+      setTimeout(() => {
+        loadProfile().then(() => { updateHeader(); if(state.profile) goProfile(); });
+      }, 0);
     } else {
       lastKnownAuthUserId = newUserId;
     }
@@ -5920,11 +5939,16 @@ async function init(){
   // ニックネーム登録(=プロフィール作成)とは別物で、これだけで「愛を送る」が使える。
   // ただし、マジックリンクで戻ってきた直後は本物のセッション確立を邪魔しない
   // よう、匿名サインインをスキップする(looksLikeAuthRedirect()参照)。
+  // また、sessionCheckFailed(=getSession()自体がタイムアウト/エラーになった)
+  // 場合も、本当にセッションが無いのか確認できなかっただけなのか区別がつかない
+  // ため、安全側に倒してスキップする。ここで誤って匿名サインインすると、
+  // 実際には登録済みのセッションがあるのに新しい匿名アカウントで上書きされ、
+  // 「登録したのに開くとゲスト扱いになる」事故につながる。
   // 匿名サインインはTurnstileの読み込み・実行を待つため数百ms〜数秒かかることが
   // あるが、映画データなどの読み込みはこれを待つ必要が無い(新規の匿名セッション
   // にはどのみち既存データが無く、空の結果を返すだけ)。以前はこれをawaitしてから
   // データ読み込みを開始していたため、その分だけ表示が遅くなっていた。並列化する。
-  const signInPromise = (!hasSupabaseSession && !looksLikeAuthRedirect())
+  const signInPromise = (!hasSupabaseSession && !sessionCheckFailed && !looksLikeAuthRedirect())
     ? autoSignInAnonymously()
     : Promise.resolve();
   await Promise.all([signInPromise, loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory()]);
