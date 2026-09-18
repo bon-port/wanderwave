@@ -266,6 +266,24 @@
     font-size: 11.5px; color: var(--ink-soft);
     margin-top: 8px;
   }
+  .intensity-band-row{
+    display:flex; flex-wrap:wrap; gap: 8px;
+  }
+  .intensity-band-chip{
+    border:1.5px solid var(--band-color, var(--line));
+    background: var(--surface);
+    color: var(--band-color, var(--ink-soft));
+    padding: 6px 13px;
+    border-radius: 999px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all .15s ease;
+  }
+  .intensity-band-chip.active{
+    background: var(--band-color, var(--ink-soft));
+    color: #fff;
+  }
   .tagchip{
     border:1px solid var(--line);
     background: var(--surface);
@@ -1647,11 +1665,10 @@
 
       <div class="intensity-filter" id="intensity-filter" style="display:none;">
         <div class="intensity-filter-label-row">
-          <div class="intensity-filter-label">表現度の上限: <span id="intensity-filter-value">こだわらない</span></div>
+          <div class="intensity-filter-label">表現度で絞り込む(複数選択可)</div>
         </div>
-        <input type="range" id="intensity-filter-slider" class="risk-slider" min="0" max="100" step="25" value="100"
-               oninput="onIntensityFilterInput(this.value)">
-        <div class="intensity-filter-caption" id="intensity-filter-caption">こだわらず全ての作品を表示します</div>
+        <div class="intensity-band-row" id="intensity-band-row"></div>
+        <div class="intensity-filter-caption" id="intensity-filter-caption">選択すると、その表現度の作品だけが表示されます。何も選ばなければ全て表示します</div>
       </div>
     </div>
 
@@ -2841,7 +2858,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], mySubmittedMovies: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 100, diagnosisHistory: [] };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], mySubmittedMovies: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityBands: new Set(), diagnosisHistory: [] };
 
 
 function riskLabel(v){
@@ -2900,29 +2917,46 @@ function renderTagCloud(){
   const showFilter = state.activeTags.size > 0;
   document.getElementById('intensity-filter').style.display = showFilter ? 'block' : 'none';
   if(showFilter){
-    onIntensityFilterInput(document.getElementById('intensity-filter-slider').value);
+    renderIntensityBandRow();
   } else {
-    // フィルターのスライダーごと隠すので、値も「こだわらない」に戻しておく。
-    // そうしないと、スライダーが見えない状態でも古い上限値が検索結果に
-    // 効き続けてしまう。
-    state.intensityFilter = 100;
+    // フィルターごと隠すので、選択状態もリセットしておく。そうしないと、
+    // フィルターが見えない状態でも古い選択が検索結果に効き続けてしまう。
+    state.intensityBands.clear();
   }
 }
 
-function onIntensityFilterInput(value){
-  state.intensityFilter = parseInt(value, 10);
-  const color = state.intensityFilter >= 100 ? 'var(--plum-btn)' : riskCategoryColor(state.intensityFilter);
-  const label = document.getElementById('intensity-filter-value');
-  label.textContent = state.intensityFilter >= 100 ? 'こだわらない' : `${riskLabel(state.intensityFilter)}以下`;
-  label.style.color = color;
-  document.getElementById('intensity-filter-slider').style.accentColor = color;
+// 表現度は元々「この値以下は全部表示」という上限方式だったが、それだと
+// 「控えめだけ見たい」と思っても実際には「控えめ以下(=控えめ含む全部)」に
+// なってしまい、意図がわかりにくかった。バンド(控えめ/軽度/やや強い/強い)ごとの
+// チップ選択にして、選んだ表現度「そのもの」だけに絞り込めるようにする
+// (複数選択可・何も選ばなければ全件表示)。
+const INTENSITY_BANDS = [25, 50, 75, 100];
 
-  const caption = document.getElementById('intensity-filter-caption');
-  caption.textContent = state.intensityFilter >= 100
-    ? 'こだわらず全ての作品を表示します'
-    : `${riskLabel(state.intensityFilter)}(${riskCategoryDescription(state.intensityFilter)})までの作品が表示されます`;
+function movieIntensityBand(m){
+  return riskCategoryUpperBound(intensityAverage(m));
+}
 
-  renderResults();
+function renderIntensityBandRow(){
+  const el = document.getElementById('intensity-band-row');
+  el.innerHTML = "";
+  INTENSITY_BANDS.forEach(band => {
+    const chip = document.createElement('div');
+    const isActive = state.intensityBands.has(band);
+    const color = riskCategoryColor(band);
+    chip.className = 'intensity-band-chip' + (isActive ? ' active' : '');
+    chip.style.setProperty('--band-color', color);
+    chip.textContent = riskLabel(band);
+    chip.title = riskCategoryDescription(band);
+    chip.onclick = () => {
+      const wasActive = state.intensityBands.has(band);
+      if(wasActive) state.intensityBands.delete(band);
+      else state.intensityBands.add(band);
+      playTone(wasActive ? 420 : 600, 0.08, 0.07, 'sine');
+      renderIntensityBandRow();
+      renderResults();
+    };
+    el.appendChild(chip);
+  });
 }
 
 function onSearchInput(){
@@ -3222,10 +3256,11 @@ function renderResults(){
       || (m.synopsis && normalizeForSearch(m.synopsis).includes(q))
       || matchesCountryAlias(m, q);
     const matchTags = state.activeTags.size === 0 || [...state.activeTags].every(t => m.tags.includes(t));
-    // 表現度フィルターは、タグを選んでいるかどうかに関係なく、設定されている
-    // 上限値だけで判定する(以前はactiveTags.size===0の時に無条件で
-    // スルーしてしまい、タグなしの文字検索では上限が一切効かないバグがあった)。
-    const matchIntensity = state.intensityFilter >= 100 || intensityAverage(m) <= riskCategoryUpperBound(state.intensityFilter);
+    // 表現度フィルターは、タグを選んでいるかどうかに関係なく、選択中の
+    // バンドだけで判定する(以前はactiveTags.size===0の時に無条件で
+    // スルーしてしまい、タグなしの文字検索では一切効かないバグがあった)。
+    // 何も選ばれていなければ全件通す。選ばれていれば、そのバンドの作品だけを通す。
+    const matchIntensity = state.intensityBands.size === 0 || state.intensityBands.has(movieIntensityBand(m));
     return matchQuery && matchTags && matchIntensity;
   });
 
