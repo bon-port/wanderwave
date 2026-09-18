@@ -4719,10 +4719,18 @@ async function loadProfile(){
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('user_name, avatar_color, avatar_photo_url, review_count, excluded_words')
+      .select('user_name, avatar_color, avatar_photo_url, review_count')
       .eq('id', user.id)
       .single();
     if(error) throw error;
+
+    // 除外ワードは本人しか読めない専用テーブルに保存している(profilesは
+    // 公開レビュー投稿者の行が他人にも見えるため、個人設定を置くのに適さない)。
+    const { data: prefs } = await supabase
+      .from('user_search_preferences')
+      .select('excluded_words')
+      .eq('user_id', user.id)
+      .maybeSingle();
 
     // 「登録済みか」は基本的にこの端末のフラグで判定するが、メール確認まで完了した
     // アカウントは、別端末からマジックリンクで戻ってきた場合でもそのまま復帰できる
@@ -4749,7 +4757,7 @@ async function loadProfile(){
       avatarPhotoPosX: crop.x,
       avatarPhotoPosY: crop.y,
       reviewCount: data.review_count || 0,
-      excludedWords: data.excluded_words || [],
+      excludedWords: (prefs && prefs.excluded_words) || [],
       // レビュー投稿・映画追加・診断結果の保存など、荒らし対策で
       // メール確認済みユーザー限定にしている機能の判定に使う。
       emailVerified: user.is_anonymous === false && !!user.email_confirmed_at
@@ -4779,9 +4787,8 @@ async function persistExcludedWords(){
     const userId = await currentUserId();
     if(!userId) return;
     const { error } = await supabase
-      .from('profiles')
-      .update({ excluded_words: state.profile.excludedWords })
-      .eq('id', userId);
+      .from('user_search_preferences')
+      .upsert({ user_id: userId, excluded_words: state.profile.excludedWords, updated_at: new Date().toISOString() }, { onConflict: 'user_id' });
     if(error) throw error;
   }catch(err){
     console.error(err);
