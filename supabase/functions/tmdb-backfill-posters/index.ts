@@ -67,7 +67,7 @@ async function searchMovie(title: string, year: number | null): Promise<any | nu
 // 採用しない)。
 Deno.serve(async (req: Request) => {
   try {
-    const { offset = 0, limit = 50, ids = null, recheck_all = false } = await req.json().catch(() => ({}));
+    const { offset = 0, limit = 50, ids = null, recheck_all = false, tmdb_id_overrides = null } = await req.json().catch(() => ({}));
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
@@ -97,7 +97,11 @@ Deno.serve(async (req: Request) => {
       const chunk = todo.slice(i, i + CONCURRENCY);
       const chunkResults = await Promise.all(
         chunk.map(async (m: any) => {
-          const match = await searchMovie(m.title, m.release_year);
+          // DBのtitleがTMDb側の正式な邦題と食い違っていて検索が当たらない
+          // 作品(例: 「フローズン2」は実際は「アナと雪の女王2」)向けに、
+          // titleでの検索を経由せず直接TMDb IDを指定できるようにする。
+          const forcedId = tmdb_id_overrides?.[String(m.id)];
+          const match = forcedId ? await tmdbFetch(`/movie/${forcedId}`, {}) : await searchMovie(m.title, m.release_year);
           if (!match || !match.poster_path) {
             // recheck_allで(adult除外後は)何もヒットしなくなった場合、以前
             // 誤って設定された可能性のあるposter_pathを残さずクリアする
