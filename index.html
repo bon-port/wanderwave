@@ -1614,6 +1614,7 @@
     </div>
 
     <div class="search-results-grid" id="results"></div>
+    <button class="ghost-btn" id="results-load-more" style="width:100%; margin-top:14px; display:none;" onclick="loadMoreResults()"></button>
 
     <div id="home-rows"></div>
   </div>
@@ -3058,6 +3059,15 @@ function matchesCountryAlias(m, normalizedQuery){
   });
 }
 
+// 検索/タグ絞り込みの結果は、件数が増えても一度にDOMへ描画する枚数が
+// 増えすぎないよう、RESULTS_PAGE_SIZE件ずつ「もっと見る」で追加表示する。
+// (作品を数千本規模に増やす予定があり、絞り込みが緩いと一致件数が
+//  非常に多くなりうるため。フィルタ自体はMOVIES配列に対する軽量な
+//  JS処理なので、ここで重くなるのは専らDOM描画の枚数)
+const RESULTS_PAGE_SIZE = 30;
+let resultsFiltered = [];
+let resultsShownCount = RESULTS_PAGE_SIZE;
+
 function renderResults(){
   const root = document.getElementById('results');
   const homeRowsEl = document.getElementById('home-rows');
@@ -3068,6 +3078,7 @@ function renderResults(){
     // 検索・タグ選択をしてない間は、おすすめの棚だけを見せる
     root.style.display = 'none';
     root.innerHTML = '';
+    document.getElementById('results-load-more').style.display = 'none';
     homeRowsEl.style.display = 'block';
     return;
   }
@@ -3075,7 +3086,7 @@ function renderResults(){
   homeRowsEl.style.display = 'none';
   root.style.display = 'grid';
 
-  let list = MOVIES.filter(m => {
+  resultsFiltered = MOVIES.filter(m => {
     const q = normalizeForSearch(state.query.trim());
     const matchQuery = q === ""
       || normalizeForSearch(m.title).includes(q)
@@ -3094,7 +3105,29 @@ function renderResults(){
     return matchQuery && matchTags && matchIntensity;
   });
 
-  renderMovieCards(root, list, '条件に合う映画が見つかりませんでした。タグを減らすか、表現度の上限を緩めてみましょう。');
+  // 検索条件が変わるたびに1ページ目から表示し直す
+  resultsShownCount = RESULTS_PAGE_SIZE;
+  renderVisibleResults();
+}
+
+function renderVisibleResults(){
+  const root = document.getElementById('results');
+  const visible = resultsFiltered.slice(0, resultsShownCount);
+  renderMovieCards(root, visible, '条件に合う映画が見つかりませんでした。タグを減らすか、表現度の上限を緩めてみましょう。');
+
+  const moreBtn = document.getElementById('results-load-more');
+  const remaining = resultsFiltered.length - resultsShownCount;
+  if(remaining > 0){
+    moreBtn.style.display = 'block';
+    moreBtn.textContent = `もっと見る(残り${remaining}件)`;
+  } else {
+    moreBtn.style.display = 'none';
+  }
+}
+
+function loadMoreResults(){
+  resultsShownCount += RESULTS_PAGE_SIZE;
+  renderVisibleResults();
 }
 
 function renderRecommended(currentMovie){
