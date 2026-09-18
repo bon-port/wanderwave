@@ -287,6 +287,23 @@
     width: 8px; height: 8px; border-radius: 50%;
     display:inline-block; flex-shrink:0;
   }
+  .excluded-words-row{
+    display:flex; flex-wrap:wrap; gap: 8px; margin-bottom: 10px;
+  }
+  .excluded-word-chip{
+    display:inline-flex; align-items:center; gap:6px;
+    border:1px solid var(--line); background: var(--surface);
+    padding: 6px 8px 6px 14px; border-radius: 999px;
+    font-size: 13px; color: var(--ink-soft);
+  }
+  .excluded-word-chip button{
+    background:none; border:none; color: var(--ink-soft);
+    cursor:pointer; font-size: 15px; line-height:1; padding: 2px 4px;
+  }
+  .excluded-word-input-row{
+    display:flex; gap: 8px;
+  }
+  .excluded-word-input-row .field-input{ flex:1; }
   .tagchip.active{
     background: var(--plum-btn);
     border-color: var(--plum-btn);
@@ -2039,6 +2056,16 @@
       <div id="pocket-lists-grid" class="lists-grid"></div>
       <div id="pocket-new-list-form" style="margin-top:10px;"></div>
 
+      <div class="pocket-divider"></div>
+
+      <div class="section-label">検索から除外したいワード</div>
+      <div class="sub" style="margin-bottom:10px;">登録した言葉に関係する作品を、自分の検索結果には出てこないようにできます。</div>
+      <div class="excluded-words-row" id="excluded-words-row"></div>
+      <div class="excluded-word-input-row">
+        <input class="field-input" id="excluded-word-input" placeholder="例: 蜘蛛" maxlength="20" onkeydown="if(event.key==='Enter'){event.preventDefault(); addExcludedWord();}">
+        <button class="ghost-btn small-btn" type="button" onclick="addExcludedWord()">追加</button>
+      </div>
+
     </div>
 
     <div class="profile-links">
@@ -3073,9 +3100,13 @@ function renderHomeRows(){
   if(countEl) countEl.textContent = MOVIES.length > 0 ? `現在${MOVIES.length.toLocaleString('ja-JP')}本の作品から探せます` : '';
   if(MOVIES.length === 0){ root.innerHTML = ""; return; }
 
+  // 個人の除外ワードに一致する作品は、ホームの棚にも出さない
+  // (検索だけ除けても、棚から見えてしまうと意味が薄いため)。
+  const visibleMovies = MOVIES.filter(m => !matchesExcludedWord(m));
+
   // タグごとの作品数を数えて、多い順に上位4つを「気分の棚」として使う
   const tagCounts = {};
-  MOVIES.forEach(m => m.tags.forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
+  visibleMovies.forEach(m => m.tags.forEach(t => { tagCounts[t] = (tagCounts[t] || 0) + 1; }));
   const topTags = Object.keys(tagCounts).sort((a, b) => tagCounts[b] - tagCounts[a]).slice(0, 4);
 
   let html = "";
@@ -3083,7 +3114,7 @@ function renderHomeRows(){
   topTags.forEach(tag => {
     // 常に同じ上位12本が固定で出続けると単調なので、ある程度評価の高い
     // プール(上位30本)から、日替わりで12本をピックアップする。
-    const pool = MOVIES.filter(m => m.tags.includes(tag))
+    const pool = visibleMovies.filter(m => m.tags.includes(tag))
       .sort((a, b) => loveAverage(b) - loveAverage(a))
       .slice(0, 30);
     const list = seededShuffle(pool, `tag:${tag}`).slice(0, 12);
@@ -3100,7 +3131,7 @@ function renderHomeRows(){
   // 「隠れた名作」棚: まだあまり愛が集まっていない(=埋もれがちな)作品を、
   // 日替わりでランダムに紹介する。ある程度情報が揃っている作品に限定して、
   // データが薄すぎる行が混ざらないようにする。
-  const hiddenGemsPool = MOVIES.filter(m => m.loveCount <= 1 && (m.synopsis || m.genre));
+  const hiddenGemsPool = visibleMovies.filter(m => m.loveCount <= 1 && (m.synopsis || m.genre));
   const hiddenGems = seededShuffle(hiddenGemsPool, 'hidden-gems').slice(0, 12);
   if(hiddenGems.length){
     html += `
@@ -3116,7 +3147,7 @@ function renderHomeRows(){
   // 予定作品)が混ざると不自然なので、公開日が判明していて、かつ今日以前の作品だけを
   // 対象に、公開日が新しい順に選ぶ。
   const todayStr = new Date().toISOString().slice(0, 10);
-  const newReleases = MOVIES.filter(m => m.japanReleaseDate && m.japanReleaseDate <= todayStr)
+  const newReleases = visibleMovies.filter(m => m.japanReleaseDate && m.japanReleaseDate <= todayStr)
     .sort((a, b) => b.japanReleaseDate.localeCompare(a.japanReleaseDate) || (b.id - a.id))
     .slice(0, 12);
   if(newReleases.length){
@@ -3128,10 +3159,10 @@ function renderHomeRows(){
 
   // 配信サービスごとの棚(実際に配信情報がある作品だけ)
   const platformSet = new Set();
-  MOVIES.forEach(m => (m.platforms || []).forEach(p => platformSet.add(p)));
+  visibleMovies.forEach(m => (m.platforms || []).forEach(p => platformSet.add(p)));
 
   platformSet.forEach(platform => {
-    const list = MOVIES.filter(m => (m.platforms || []).includes(platform))
+    const list = visibleMovies.filter(m => (m.platforms || []).includes(platform))
       .sort((a, b) => loveAverage(b) - loveAverage(a))
       .slice(0, 6);
     if(list.length === 0) return;
@@ -3156,10 +3187,11 @@ function renderFeaturedBanner(){
   // (見せる→さらに票が集まる、の繰り返しで)、いつまでも同じ顔ぶれで
   // 固定化してしまう。実際に愛された実績がある作品(loveCount>0)の中から
   // 上位30本のプールを作り、そこから日替わりで5本をピックアップする。
-  const lovedPool = MOVIES.filter(m => m.loveCount > 0)
+  const eligibleMovies = MOVIES.filter(m => !matchesExcludedWord(m));
+  const lovedPool = eligibleMovies.filter(m => m.loveCount > 0)
     .sort((a, b) => loveAverage(b) - loveAverage(a))
     .slice(0, 30);
-  const pool = lovedPool.length > 0 ? lovedPool : [...MOVIES].sort((a, b) => loveAverage(b) - loveAverage(a));
+  const pool = lovedPool.length > 0 ? lovedPool : [...eligibleMovies].sort((a, b) => loveAverage(b) - loveAverage(a));
   featuredList = seededShuffle(pool, 'featured-banner').slice(0, 5);
   if(featuredIndex >= featuredList.length) featuredIndex = 0;
 
@@ -3390,7 +3422,7 @@ function renderResults(){
     // スルーしてしまい、タグなしの文字検索では一切効かないバグがあった)。
     // 0(こだわらない)なら全件通す。それ以外はそのバンドの作品だけを通す。
     const matchIntensity = state.intensityFilter === 0 || movieIntensityBand(m) === state.intensityFilter;
-    return matchQuery && matchTags && matchIntensity;
+    return matchQuery && matchTags && matchIntensity && !matchesExcludedWord(m);
   });
 
   // 検索条件が変わるたびに1ページ目から表示し直す
@@ -4633,7 +4665,7 @@ async function loadProfile(){
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('user_name, avatar_color, avatar_photo_url, review_count')
+      .select('user_name, avatar_color, avatar_photo_url, review_count, excluded_words')
       .eq('id', user.id)
       .single();
     if(error) throw error;
@@ -4663,6 +4695,7 @@ async function loadProfile(){
       avatarPhotoPosX: crop.x,
       avatarPhotoPosY: crop.y,
       reviewCount: data.review_count || 0,
+      excludedWords: data.excluded_words || [],
       // レビュー投稿・映画追加・診断結果の保存など、荒らし対策で
       // メール確認済みユーザー限定にしている機能の判定に使う。
       emailVerified: user.is_anonymous === false && !!user.email_confirmed_at
@@ -4671,6 +4704,66 @@ async function loadProfile(){
     console.error(err);
     state.profile = null;
   }
+}
+
+// 検索結果から個人的に除外したいワード(苦手なモチーフ等)。他人には見えない
+// 本人専用の設定で、タイトル・ジャンル・あらすじ・雰囲気キーワードのいずれかに
+// 一致したら検索結果から外す(matchesExcludedWord、renderResults内で使用)。
+function renderExcludedWords(){
+  const root = document.getElementById('excluded-words-row');
+  if(!root) return;
+  const words = (state.profile && state.profile.excludedWords) || [];
+  // 除外ワードは利用者本人の自由入力(アポストロフィ等を含みうる)なので、
+  // onclick内にJS文字列として直接埋め込まず、data属性経由で安全に渡す。
+  root.innerHTML = words.map(w => `
+    <span class="excluded-word-chip">${escapeHtml(w)}<button type="button" data-word="${escapeHtml(w)}" onclick="removeExcludedWord(this.dataset.word)">×</button></span>
+  `).join('');
+}
+
+async function persistExcludedWords(){
+  try{
+    const userId = await currentUserId();
+    if(!userId) return;
+    const { error } = await supabase
+      .from('profiles')
+      .update({ excluded_words: state.profile.excludedWords })
+      .eq('id', userId);
+    if(error) throw error;
+  }catch(err){
+    console.error(err);
+    showToast('保存に失敗しました。通信環境を確認してください。');
+  }
+}
+
+async function addExcludedWord(){
+  if(!state.profile) return;
+  const input = document.getElementById('excluded-word-input');
+  const word = input.value.trim();
+  if(!word) return;
+  if(!state.profile.excludedWords.includes(word)){
+    state.profile.excludedWords.push(word);
+    await persistExcludedWords();
+    renderExcludedWords();
+    renderResults();
+  }
+  input.value = '';
+}
+
+async function removeExcludedWord(word){
+  if(!state.profile) return;
+  state.profile.excludedWords = state.profile.excludedWords.filter(w => w !== word);
+  await persistExcludedWords();
+  renderExcludedWords();
+  renderResults();
+}
+
+function matchesExcludedWord(m){
+  const words = (state.profile && state.profile.excludedWords) || [];
+  if(words.length === 0) return false;
+  const haystack = normalizeForSearch(
+    [m.title, m.synopsis, ...(m.genre || []), ...(m.keywords || [])].filter(Boolean).join(' ')
+  );
+  return words.some(w => haystack.includes(normalizeForSearch(w)));
 }
 
 async function loadMySubmittedMovies(){
@@ -4983,6 +5076,7 @@ async function goProfile(){
     pocketShownCount = POCKET_PAGE_SIZE;
     renderPocketView();
     renderViewingRecord();
+    renderExcludedWords();
   } else {
     summaryEl.style.display = 'none';
     editFormEl.style.display = 'block';
