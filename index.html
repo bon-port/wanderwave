@@ -1775,11 +1775,14 @@
           <div class="post-block-label">ひとこと感想</div>
           <textarea id="review-text" maxlength="200" rows="3" placeholder="200字まで書けます(例: 泣けるけど元気が出る話でした)"></textarea>
           <div class="slider-value" id="review-count">0 / 200</div>
-          <div id="review-turnstile-widget" style="margin:8px 0;"></div>
-          <div class="form-actions" id="review-submit-wrap" style="position:relative;">
-            <button class="primary-btn" id="review-submit-btn" onclick="submitReview()">投稿する</button>
-            <button class="ghost-btn" id="review-delete-btn" onclick="deleteReview(state.currentMovieId)" style="display:none;">この感想を削除</button>
-          </div>
+        </div>
+
+        <div class="post-divider"></div>
+
+        <div class="post-block" id="tag-vote-block" style="position:relative;">
+          <div class="post-kicker">感情タグ</div>
+          <button class="link-btn" id="tag-vote-toggle" onclick="toggleTagVote()">+ 感情タグを追加する</button>
+          <div id="tag-vote-select" class="tag-select" style="display:none; margin-top:8px;"></div>
         </div>
 
         <div class="post-divider"></div>
@@ -1790,22 +1793,22 @@
             <div class="risk-vote-label">刺激の強さを評価する: <span id="intensity-live-label">-</span></div>
           </div>
           <div id="intensity-slider-wrap" style="position:relative;">
-            <input type="range" id="intensity-slider" class="risk-slider" min="0" max="100" value="50"
+            <input type="range" id="intensity-slider" class="risk-slider" min="0" max="100" value="0"
                    oninput="onIntensitySliderInput(this.value)">
           </div>
 
-          <div class="reason-reveal" id="reason-reveal" style="display:none;">
-            <div class="post-block-label" style="margin-top:14px;">当てはまるものは?(任意・複数選択可)</div>
+          <div class="reason-reveal" id="reason-reveal">
+            <div class="post-block-label" style="margin-top:14px;">その時に当てはまるものは?(任意・複数選択可)</div>
             <div class="tag-select" id="reason-chip-select"></div>
           </div>
         </div>
 
         <div class="post-divider"></div>
 
-        <div class="post-block" id="tag-vote-block" style="position:relative;">
-          <div class="post-kicker">感情タグ</div>
-          <button class="link-btn" id="tag-vote-toggle" onclick="toggleTagVote()">+ 感情タグを追加する</button>
-          <div id="tag-vote-select" class="tag-select" style="display:none; margin-top:8px;"></div>
+        <div id="review-turnstile-widget" style="margin:8px 0;"></div>
+        <div class="form-actions" id="review-submit-wrap" style="position:relative;">
+          <button class="primary-btn" id="review-submit-btn" onclick="submitReview()">投稿する</button>
+          <button class="ghost-btn" id="review-delete-btn" onclick="deleteReview(state.currentMovieId)" style="display:none;">この感想を削除</button>
         </div>
       </div>
     </div>
@@ -2100,10 +2103,10 @@
       </div>
 
       <div class="field">
-        <label>刺激の強さ: <span id="ml-intensity-live-label">やや強い(50%)</span></label>
-        <input type="range" id="ml-intensity-slider" class="risk-slider" min="0" max="100" value="50" oninput="onMlIntensityInput(this.value)">
-        <div class="reason-reveal" id="ml-reason-reveal" style="display:none; margin-top:10px;">
-          <div class="post-block-label">当てはまるものは?(任意・複数選択可)</div>
+        <label>刺激の強さ: <span id="ml-intensity-live-label">控えめ(0%)</span></label>
+        <input type="range" id="ml-intensity-slider" class="risk-slider" min="0" max="100" value="0" oninput="onMlIntensityInput(this.value)">
+        <div class="reason-reveal" id="ml-reason-reveal" style="margin-top:10px;">
+          <div class="post-block-label">その時に当てはまるものは?(任意・複数選択可)</div>
           <div class="tag-select" id="ml-reason-select"></div>
         </div>
       </div>
@@ -3547,7 +3550,6 @@ function updateIntensityDisplay(value){
   label.textContent = `${riskLabel(value)}(${value}%)`;
   label.style.color = color;
   document.getElementById('intensity-slider').style.accentColor = color;
-  document.getElementById('reason-reveal').style.display = value > 25 ? 'block' : 'none';
 }
 
 function onIntensitySliderInput(value){
@@ -3874,7 +3876,7 @@ async function goDetail(id){
 
   document.getElementById('add-to-list-modal').style.display = 'none';
 
-  const mySliderVal = myPrevVote !== undefined ? myPrevVote : 50;
+  const mySliderVal = myPrevVote !== undefined ? myPrevVote : 0;
   document.getElementById('intensity-slider').value = mySliderVal;
   updateIntensityDisplay(mySliderVal);
 
@@ -5074,7 +5076,7 @@ function goMyLogForm(logId){
   document.getElementById('mylog-heading').textContent = log ? '視聴ログを編集' : '視聴ログを書く';
   document.getElementById('ml-title').value = log ? log.movie_title : '';
   document.getElementById('ml-review').value = log ? (log.review_text || '') : '';
-  document.getElementById('ml-intensity-slider').value = log ? (log.expression_level != null ? log.expression_level : 50) : 50;
+  document.getElementById('ml-intensity-slider').value = log ? (log.expression_level != null ? log.expression_level : 0) : 0;
   document.getElementById('mylog-submit-btn').textContent = log ? '更新する' : '記録する';
   document.getElementById('mylog-delete-btn').style.display = log ? 'inline-block' : 'none';
 
@@ -5139,7 +5141,6 @@ function onMlIntensityInput(value){
   label.textContent = `${riskLabel(value)}(${value}%)`;
   label.style.color = color;
   document.getElementById('ml-intensity-slider').style.accentColor = color;
-  document.getElementById('ml-reason-reveal').style.display = value > 25 ? 'block' : 'none';
 }
 
 async function saveMyLog(){
