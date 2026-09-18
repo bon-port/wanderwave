@@ -365,6 +365,14 @@
     position: relative;
     overflow: hidden;
   }
+  .series-more-thumb{
+    background: var(--surface);
+    border: 1.5px dashed var(--line);
+    color: var(--ink-soft);
+    font-family:'M PLUS Rounded 1c', sans-serif;
+    font-size: 14px; font-weight: 600;
+    text-align: center; line-height: 1.6;
+  }
   .poster-thumb img{
     position: absolute; inset: 0;
     width: 100%; height: 100%;
@@ -2308,6 +2316,16 @@
   </div>
 </div>
 
+<div class="diagnosis-history-overlay" id="series-list-overlay" style="display:none;" onclick="if(event.target===this) closeSeriesListModal()">
+  <div class="diagnosis-history-drawer" id="series-list-drawer">
+    <div class="diagnosis-history-header">
+      <div class="diagnosis-history-title" id="series-list-title">シリーズ</div>
+      <button class="diagnosis-history-close" onclick="closeSeriesListModal()">×</button>
+    </div>
+    <div id="series-list-items" class="pocket-grid"></div>
+  </div>
+</div>
+
 <!-- この2つは以前<head>にあり、ページ本体のHTML(スプラッシュ画面を含む)より
      先に読み込み・実行されるため、外部CDNの応答待ちの間、画面に何も描画
      できない時間が発生していた。実行順序は変えずに読み込み位置だけを
@@ -3408,15 +3426,20 @@ function goToResultsPage(delta){
   document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
+// シリーズの棚が長すぎると横スクロールが延々続いて使いにくいので、
+// 一定本数まではそのまま並べ、それを超える分は「もっと見る」から
+// 全部入りの一覧モーダルで見せる。
+const SERIES_ROW_LIMIT = 8;
+
 function renderRecommended(currentMovie){
   const root = document.getElementById('d-recommended');
   const MIN_COUNT = 4;
 
   const others = MOVIES.filter(m => m.id !== currentMovie.id);
 
-  // シリーズの他の作品
+  // シリーズの他の作品(公開年順)
   const seriesSiblings = currentMovie.series
-    ? others.filter(m => m.series === currentMovie.series).sort((a, b) => (a.seriesOrder || 0) - (b.seriesOrder || 0))
+    ? others.filter(m => m.series === currentMovie.series).sort((a, b) => a.year - b.year)
     : [];
   // リメイク・同じ物語の別バージョン
   const remakeSiblings = currentMovie.remakeGroup
@@ -3441,7 +3464,21 @@ function renderRecommended(currentMovie){
   const seriesWrap = document.getElementById('d-series-wrap');
   if(seriesSiblings.length > 0){
     seriesWrap.style.display = 'block';
-    renderMovieCards(seriesRoot, seriesSiblings, '');
+    const visibleSiblings = seriesSiblings.slice(0, SERIES_ROW_LIMIT);
+    renderMovieCards(seriesRoot, visibleSiblings, '');
+    if(seriesSiblings.length > SERIES_ROW_LIMIT){
+      // シリーズ名は自由記述のTMDb由来テキストなので、onclick内にJS文字列として
+      // 直接埋め込むとエスケープの層がねじれて壊れうる(HTML属性のデコードが
+      // JS文字列の閉じクォートを誤って生成してしまう)。data属性経由にして、
+      // JSへは常にデコード済みの安全な文字列として渡す。
+      const fullSeries = [currentMovie, ...seriesSiblings].sort((a, b) => a.year - b.year);
+      const fullSeriesIdsJson = escapeHtml(JSON.stringify(fullSeries.map(m => m.id)));
+      seriesRoot.innerHTML += `
+        <div class="result-card series-more-card" data-series="${escapeHtml(currentMovie.series)}" data-ids="${fullSeriesIdsJson}" onclick="openSeriesListModal(this.dataset.series, JSON.parse(this.dataset.ids))">
+          <div class="poster-thumb series-more-thumb">もっと見る<br>(全${fullSeries.length}作品)</div>
+        </div>
+      `;
+    }
   } else {
     seriesWrap.style.display = 'none';
   }
@@ -3454,6 +3491,23 @@ function renderRecommended(currentMovie){
   } else {
     remakeWrap.style.display = 'none';
   }
+}
+
+function openSeriesListModal(seriesName, movieIds){
+  document.getElementById('series-list-title').textContent = seriesName;
+  const movies = movieIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
+  renderMovieCards(document.getElementById('series-list-items'), movies, '', { overlayTitle: true });
+  const overlay = document.getElementById('series-list-overlay');
+  const drawer = document.getElementById('series-list-drawer');
+  overlay.style.display = 'flex';
+  drawer.classList.remove('closing');
+}
+
+function closeSeriesListModal(){
+  const overlay = document.getElementById('series-list-overlay');
+  const drawer = document.getElementById('series-list-drawer');
+  drawer.classList.add('closing');
+  setTimeout(() => { overlay.style.display = 'none'; }, 280);
 }
 
 function showToast(msg){
@@ -4367,7 +4421,7 @@ async function selectAllRows(table, columns){
 async function loadMovies(){
   try{
     const [moviesData, statsRes, estimatesData] = await Promise.all([
-      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path, japan_release_date, keywords'),
+      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path, japan_release_date, keywords, series'),
       supabase.from('movie_review_stats').select('*'),
       selectAllRows('movie_expression_estimates', 'movie_id, expression_level, reason_tags')
     ]);
@@ -4404,6 +4458,7 @@ async function loadMovies(){
         posterPath: row.poster_path || null,
         japanReleaseDate: row.japan_release_date || null,
         keywords: row.keywords || [],
+        series: row.series || null,
         platforms: [],
         tagVotes: {},
         reviews: [],

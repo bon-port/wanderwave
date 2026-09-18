@@ -51,6 +51,12 @@ function countryNameJa(iso: string, fallback: string): string {
 
 const SYNOPSIS_MAX_LEN = 400;
 
+// TMDbのコレクション名は「〇〇 Collection」「〇〇コレクション」という
+// 接尾辞つきで返るため、表示・同一シリーズ判定の両方で扱いやすいように外す。
+function cleanSeriesName(name: string): string {
+  return name.replace(/\s*(Collection|コレクション)\s*$/i, "").trim();
+}
+
 function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -200,6 +206,7 @@ Deno.serve(async (req: Request) => {
           const synopsis = (details.overview || "").slice(0, SYNOPSIS_MAX_LEN);
           const japanReleaseDate = extractJapanReleaseDate(releaseDates?.results || []);
           const keywords = (keywordsRes?.keywords || []).slice(0, 15).map((k: any) => k.name);
+          const series = details.belongs_to_collection?.name ? cleanSeriesName(details.belongs_to_collection.name) : null;
 
           return {
             title: details.title || c.title,
@@ -215,6 +222,8 @@ Deno.serve(async (req: Request) => {
             japan_release_checked_at: new Date().toISOString(),
             keywords: keywords.length ? keywords : null,
             keywords_checked_at: new Date().toISOString(),
+            series,
+            series_checked_at: new Date().toISOString(),
             tmdb_id: c.id,
             tmdb_vote_count: c.vote_count,
             tmdb_vote_average: c.vote_average,
