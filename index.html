@@ -2457,9 +2457,20 @@ function looksLikeAuthRedirect(){
   return new URLSearchParams(window.location.search).has('code');
 }
 
+// getSession()と同じ理由(gotrue-jsが希にハングする)で、getUser()にも
+// タイムアウトを付ける。以前はここで無期限に待ってしまい、呼び出し側の
+// try/catchが「未ログイン」と誤解して視聴記録などのローカル表示を
+// 空にリセットしてしまうことがあった(=「たまに消える」の正体)。
+// 「本当に未ログイン」(null)と「確認できなかっただけ」(undefined)を
+// 呼び出し側が区別できるようにする。
 async function currentUserId(){
-  const { data: { user } } = await supabase.auth.getUser();
-  return user ? user.id : null;
+  try{
+    const { data: { user } } = await withTimeout(supabase.auth.getUser(), 6000);
+    return user ? user.id : null;
+  }catch(err){
+    console.error('ユーザー情報の取得に失敗しました', err);
+    return undefined;
+  }
 }
 
 // レビュー投稿フォーム用のTurnstileウィジェット(プロフィール登録用とは別インスタンス)。
@@ -4604,6 +4615,11 @@ async function loadMovies(){
 async function loadMyReviews(){
   try{
     const userId = await currentUserId();
+    // userIdがundefinedは「未ログイン」ではなく「確認できなかった」ケース
+    // (currentUserId内のタイムアウト等)。ここで空にリセットすると、
+    // 実際にはログイン済みなのに視聴記録が一時的に消えて見える事故になるため、
+    // 判定できるまで今の状態をそのまま残す。
+    if(userId === undefined) return;
     if(!userId){
       state.myLove = {}; state.myIntensity = {}; state.myReason = {};
       state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
@@ -4630,9 +4646,9 @@ async function loadMyReviews(){
       }
     });
   }catch(err){
+    // 取得自体(DB通信)に失敗した場合も、未ログイン扱いにして消すのではなく、
+    // 今表示できている内容をそのまま残す(次の読み込みで直る一時的な失敗のため)。
     console.error('自分の投票の読み込みに失敗しました', err);
-    state.myLove = {}; state.myIntensity = {}; state.myReason = {};
-    state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
   }
 }
 
@@ -4854,6 +4870,8 @@ function matchesExcludedWord(m){
 async function loadMySubmittedMovies(){
   try{
     const userId = await currentUserId();
+    // undefinedは「確認できなかっただけ」なので、視聴記録を消さずに保持する。
+    if(userId === undefined) return;
     if(!userId){ state.mySubmittedMovieIds = []; state.mySubmittedMovies = []; return; }
     const { data, error } = await supabase.from('movies').select('id, created_at').eq('added_by', userId);
     if(error) throw error;
@@ -4861,8 +4879,6 @@ async function loadMySubmittedMovies(){
     state.mySubmittedMovies = data || [];
   }catch(err){
     console.error(err);
-    state.mySubmittedMovieIds = [];
-    state.mySubmittedMovies = [];
   }
 }
 
@@ -5210,6 +5226,8 @@ let mlSelectedReasons = new Set();
 async function loadMyLogs(){
   try{
     const userId = await currentUserId();
+    // undefinedは「確認できなかっただけ」なので、視聴記録を消さずに保持する。
+    if(userId === undefined) return;
     if(!userId){ state.myLogs = []; return; }
     const { data, error } = await supabase
       .from('movie_logs')
@@ -5220,7 +5238,6 @@ async function loadMyLogs(){
     state.myLogs = data || [];
   }catch(err){
     console.error(err);
-    state.myLogs = [];
   }
 }
 
