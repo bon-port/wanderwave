@@ -5262,9 +5262,9 @@ function createNewList(){
 // 呼び出し側でrequireVerifiedUser()済みであることを前提とする。
 async function createUserList(name, initialMovieId){
   const userId = await currentUserId();
-  const { data, error } = await supabase.from('user_lists').insert({ user_id: userId, name }).select('id').single();
+  const { data, error } = await supabase.from('user_lists').insert({ user_id: userId, name }).select('id, share_token').single();
   if(error) throw error;
-  const newList = { id: String(data.id), name, movieIds: [] };
+  const newList = { id: String(data.id), name, shareToken: data.share_token, movieIds: [] };
   if(initialMovieId != null){
     const { error: itemErr } = await supabase.from('user_list_items').insert({ list_id: data.id, movie_id: initialMovieId });
     if(itemErr) throw itemErr;
@@ -5316,30 +5316,24 @@ function goListDetail(listId){
 }
 
 // 「あとで観る」はDBの行を持たない特別なリストなので共有リンクを作れない。
-function buildListShareUrl(listId){
-  return `${window.location.origin}${window.location.pathname}?list=${listId}`;
+// リンクにはid(連番で誰でも総当たりできてしまう)ではなく、ランダムなshare_tokenを使う。
+function buildListShareUrl(shareToken){
+  return `${window.location.origin}${window.location.pathname}?share=${shareToken}`;
 }
 
-// 共有リンク(?list=<id>)から開いた第三者向けに、そのリストだけを読み込んで表示する。
-// user_lists/user_list_itemsは本人以外にも読み取りを許可するRLSポリシーが前提。
-async function loadSharedListView(listId){
-  if(!Number.isFinite(listId)) return false;
+// 共有リンク(?share=<token>)から開いた第三者向けに、そのリストだけを読み込んで表示する。
+// user_lists/user_list_itemsは本人しか読めないRLSに戻したため、
+// get-shared-list関数(service role)経由でトークンに一致する1件だけを取得する。
+async function loadSharedListView(shareToken){
+  if(!shareToken) return false;
   try{
-    const { data: list, error: listErr } = await supabase
-      .from('user_lists')
-      .select('id, name')
-      .eq('id', listId)
-      .single();
-    if(listErr || !list) throw listErr || new Error('list not found');
+    const { data, error } = await supabase.functions.invoke('get-shared-list', {
+      body: { share_token: shareToken }
+    });
+    if(error || !data || data.error) throw error || new Error(data && data.error);
 
-    const { data: items, error: itemsErr } = await supabase
-      .from('user_list_items')
-      .select('movie_id')
-      .eq('list_id', listId);
-    if(itemsErr) throw itemsErr;
-
-    const movies = (items || []).map(row => MOVIES.find(m => m.id === row.movie_id)).filter(Boolean);
-    document.getElementById('shared-list-name').textContent = list.name;
+    const movies = (data.movie_ids || []).map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
+    document.getElementById('shared-list-name').textContent = data.name;
     document.getElementById('shared-list-count').textContent = `${movies.length}本の映画`;
     renderMovieCards(document.getElementById('shared-list-items'), movies, 'このリストにはまだ映画がありません。', { overlayTitle: true });
     switchView('view-shared-list');
@@ -5566,7 +5560,7 @@ async function shareCurrentList(){
   // 「あとで観る」はDBの行を持たないため、共有リンク(そのリストだけを見せるページ)は作れない。
   // その場合はリンク無しで従来通りの画像共有のみ行う。
   const canLink = !list.isBuiltIn;
-  const shareUrl = canLink ? buildListShareUrl(list.id) : null;
+  const shareUrl = canLink ? buildListShareUrl(list.shareToken) : null;
   const shareText = canLink
     ? `${list.name}\n#Wander で見つけました\n${shareUrl}`
     : `${list.name}\n#Wander で見つけました`;
@@ -5696,13 +5690,14 @@ async function loadMyLists(){
     if(!userId){ state.myLists = []; return; }
     const { data, error } = await supabase
       .from('user_lists')
-      .select('id, name, user_list_items(movie_id)')
+      .select('id, name, share_token, user_list_items(movie_id)')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
     if(error) throw error;
     state.myLists = (data || []).map(row => ({
       id: String(row.id),
       name: row.name,
+      shareToken: row.share_token,
       movieIds: (row.user_list_items || []).map(item => item.movie_id)
     }));
   }catch(err){ state.myLists = []; }
@@ -6083,11 +6078,11 @@ async function init(){
   renderHomeRows();
   updateHeader();
 
-  // 共有リンク(?list=<id>)から開かれた場合は、ログイン状態に関わらずそのリストだけを
+  // 共有リンク(?share=<token>)から開かれた場合は、ログイン状態に関わらずそのリストだけを
   // 表示する。MOVIESの読み込み後(=上のPromise.all後)である必要がある。
-  const sharedListId = new URLSearchParams(window.location.search).get('list');
-  if(sharedListId){
-    const ok = await loadSharedListView(parseInt(sharedListId, 10));
+  const sharedToken = new URLSearchParams(window.location.search).get('share');
+  if(sharedToken){
+    const ok = await loadSharedListView(sharedToken);
     if(!ok) showToast('リストが見つかりませんでした');
   }
 }
