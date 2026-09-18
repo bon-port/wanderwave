@@ -57,6 +57,15 @@
     -webkit-font-smoothing: antialiased;
   }
   .app{ max-width: 720px; margin: 0 auto; padding: 0 20px 80px; }
+  /* PCの広い画面では、スマホ向け1カラムのまま横に間延びさせず、コンテンツ幅を
+     少しずつ広げつつ、カード類は後述のauto-fillグリッドで列数を増やして
+     埋める(1枚1枚が不自然に巨大化しないようにする)。 */
+  @media (min-width: 860px){
+    .app{ max-width: 900px; }
+  }
+  @media (min-width: 1180px){
+    .app{ max-width: 1100px; }
+  }
 
   /* ---- top bar ---- */
   .topbar{
@@ -126,10 +135,16 @@
   .featured-card{
     position: relative;
     width: 100%; aspect-ratio: 16 / 10;
+    max-height: 340px;
     overflow: hidden;
     cursor: pointer;
     display:flex; align-items:flex-end;
     transition: transform 0.15s ease;
+  }
+  /* .appの最大幅をPCで広げた分、16:10のままだとバナーが不自然に縦長化するため、
+     広い画面ではアスペクト比を横長寄りに切り替えて高さの伸びを抑える。 */
+  @media (min-width: 860px){
+    .featured-card{ aspect-ratio: 21 / 9; }
   }
   .featured-card:active{
     transform: scale(0.985);
@@ -277,7 +292,10 @@
   .search-results-grid{
     margin-top: 22px;
     display:grid;
-    grid-template-columns: repeat(3, 1fr);
+    /* 固定3列だと画面が広い時に1枚1枚が巨大化して不自然になるため、
+       1枚あたりの最小幅だけ決めて、入る分だけ列数が自動で増える形にする
+       (Netflix/JustWatch等のギャラリー型グリッドでよく使われるパターン)。 */
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
     gap: 16px 14px;
   }
   .search-results-grid .result-card{
@@ -1282,7 +1300,7 @@
   }
 
   .diagnosis-picker{
-    display:grid; grid-template-columns: repeat(4, 1fr);
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
     gap: 8px;
   }
   .diagnosis-picker-item{
@@ -1343,10 +1361,10 @@
   .diagnosis-history-overlay{
     position: fixed; inset: 0; z-index: 60;
     background: rgba(0,0,0,0.5);
-    display:flex; align-items:flex-end;
+    display:flex; align-items:flex-end; justify-content:center;
   }
   .diagnosis-history-drawer{
-    width: 100%; max-height: 82vh;
+    width: 100%; max-width: 720px; max-height: 82vh;
     background: var(--bg);
     border-radius: 20px 20px 0 0;
     border-top: 1px solid var(--line);
@@ -1395,7 +1413,7 @@
     padding-top: 10px; margin-bottom: 10px;
   }
   .diagnosis-history-posters{
-    display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px;
   }
   .diagnosis-history-posters .poster-thumb{ width:100%; height:auto; aspect-ratio: 2/3; }
   .diagnosis-history-posters .result-title,
@@ -1420,7 +1438,7 @@
   }
 
   .pocket-grid{
-    display:grid; grid-template-columns: repeat(3, 1fr);
+    display:grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 10px;
   }
   .pocket-grid .result-card{
@@ -1440,7 +1458,7 @@
   }
   #lists-grid.lists-grid{
     display:grid;
-    grid-template-columns: repeat(2, 1fr);
+    grid-template-columns: repeat(auto-fill, minmax(128px, 1fr));
     gap: 14px;
     overflow-x: visible;
   }
