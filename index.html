@@ -3111,6 +3111,20 @@ function renderHomeRows(){
 
   let html = "";
 
+  // 「今話題の新作」を一番上に。日本で未公開の作品(公開日が無い、または
+  // 公開日がまだ来ていない予定作品)が混ざると不自然なので、公開日が判明していて、
+  // かつ今日以前の作品だけを対象に、公開日が新しい順に選ぶ。
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const newReleases = visibleMovies.filter(m => m.japanReleaseDate && m.japanReleaseDate <= todayStr)
+    .sort((a, b) => b.japanReleaseDate.localeCompare(a.japanReleaseDate) || (b.id - a.id))
+    .slice(0, 12);
+  if(newReleases.length){
+    html += `
+      <div class="section-label">今話題の新作</div>
+      <div class="results">${newReleases.map(buildCardHTML).join('')}</div>
+    `;
+  }
+
   topTags.forEach(tag => {
     // 常に同じ上位12本が固定で出続けると単調なので、ある程度評価の高い
     // プール(上位30本)から、日替わりで12本をピックアップする。
@@ -3140,20 +3154,6 @@ function renderHomeRows(){
         <div class="mood-row-tag" style="color:var(--plum-btn)">隠れた名作</div>
       </div>
       <div class="results">${hiddenGems.map(buildCardHTML).join('')}</div>
-    `;
-  }
-
-  // 「今話題の新作」は日本で未公開の作品(公開日が無い、または公開日がまだ来ていない
-  // 予定作品)が混ざると不自然なので、公開日が判明していて、かつ今日以前の作品だけを
-  // 対象に、公開日が新しい順に選ぶ。
-  const todayStr = new Date().toISOString().slice(0, 10);
-  const newReleases = visibleMovies.filter(m => m.japanReleaseDate && m.japanReleaseDate <= todayStr)
-    .sort((a, b) => b.japanReleaseDate.localeCompare(a.japanReleaseDate) || (b.id - a.id))
-    .slice(0, 12);
-  if(newReleases.length){
-    html += `
-      <div class="section-label">今話題の新作</div>
-      <div class="results">${newReleases.map(buildCardHTML).join('')}</div>
     `;
   }
 
