@@ -1929,7 +1929,7 @@
       <button class="primary-btn diagnosis-run-btn-prominent" id="diagnosis-run-btn" style="width:100%; margin-top:14px;" onclick="runNewDiagnosis()" disabled>診断する</button>
 
       <div id="diagnosis-result" class="pocket-diagnosis" style="display:none;">
-        <div class="pocket-diagnosis-title">今のあなたの形</div>
+        <div class="pocket-diagnosis-title">🔮 今のあなたのシネマ・テーマ</div>
         <div class="pocket-diagnosis-name" id="new-diagnosis-name"></div>
         <div class="pocket-diagnosis-text" id="new-diagnosis-text"></div>
         <div id="new-diagnosis-movies" class="diagnosis-result-movies"></div>
@@ -2597,6 +2597,15 @@ function escapeHtml(str){
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+// MOVIES上のタイトルはinnerHTML挿入向けにescapeHtml済みのため、診断文言のように
+// textContentへそのまま差し込む(=プレーンテキストとして扱う)場所では、いったん
+// 元の文字に戻す必要がある。
+function unescapeHtml(str){
+  const el = document.createElement('textarea');
+  el.innerHTML = str;
+  return el.value;
 }
 
 let MOVIES = [];
@@ -4905,30 +4914,55 @@ async function loadMyPocket(){
 }
 
 // 各感情タグの根底にある「構造」を、断定的な名詞句として定義する
-const THEME_STRUCTURE = {
-  "楽しい":       "日常からの逸脱",
-  "感動":         "カタルシスへの依存",
-  "リラックス":   "刺激からの意図的な退避",
-  "ワクワク":     "未知への接近欲求",
-  "怖い":         "制御された恐怖の消費",
-  "美しい":       "秩序への逃避",
-  "ドキドキ":     "緊張状態の疑似体験",
-  "笑い":         "摩擦の忌避",
-  "悲しい":       "喪失の反復確認",
-  "考えさせられる": "意味の外部委託"
+// 占い師のような温かい鑑定トーンで診断文を作る。バーナム/フォーラー効果を
+// 意識し、誰にでも当てはまりうる両価的(例:大胆さと繊細さの両立)な言い回しを
+// 使いつつ、必ず「選ばれた作品のタイトル」という具体的な事実に結びつけることで
+// 「自分だけの結果」に感じられるようにする。冷たい分析用語(データ・構造・
+// 分析・傾向・パターンなど)は使わず、「〜かもしれません」「〜のようですね」と
+// 余白を残す言い回しにする。
+const THEME_NAME = {
+  "楽しい":         "陽だまりの中の冒険者",
+  "感動":           "涙のあとに咲く花",
+  "リラックス":     "凪いだ心の航海士",
+  "ワクワク":       "好奇心という名の羅針盤",
+  "怖い":           "闇を恐れず歩む探検家",
+  "美しい":         "静かな美意識の錬金術師",
+  "ドキドキ":       "鼓動が導く道しるべ",
+  "笑い":           "軽やかな魂の旅人",
+  "悲しい":         "優しい涙を知る者",
+  "考えさせられる": "問いを抱いて歩む賢者"
 };
 
-function intensityBand(avg){
-  if(avg <= 25) return "low";
-  if(avg <= 50) return "mid";
-  if(avg <= 75) return "high";
-  return "extreme";
-}
+// 誰にでも当てはまりうる、両価的(バーナム効果)な感性の強み。
+const SENSE_LIGHT = {
+  "楽しい":         "何気ない日常の中に小さな冒険を見つけ出す身軽さと、大切な瞬間はしっかり味わい尽くす丁寧さを、あなたは両方持ち合わせているようです。",
+  "感動":           "人の心の機微に深く寄り添う繊細さと、そこから前を向く力に変えるしなやかな強さを、あなたは併せ持っているのかもしれません。",
+  "リラックス":     "静けさの中で自分を取り戻す落ち着きと、いざという時にすっと動き出す軽やかさを、あなたはちゃんと持っています。",
+  "ワクワク":       "知らない世界に飛び込む好奇心と、足元をきちんと見つめる着実さを、あなたは両方兼ね備えているようです。",
+  "怖い":           "得体のしれないものにもまっすぐ向き合う大胆さと、その裏にある繊細な感受性を、あなたは同時に持っているのかもしれません。",
+  "美しい":         "細部の美しさに気づく感性の鋭さと、それを大らかに受け止める心の余白を、あなたは両方大切にしているようです。",
+  "ドキドキ":       "スリルに心を委ねる大胆さと、大事な人やものへの一途さを、あなたはどちらも持ち合わせています。",
+  "笑い":           "肩の力を抜いて笑い飛ばす軽やかさと、ここぞという時にまっすぐな想いを見せる誠実さを、あなたは併せ持っているようです。",
+  "悲しい":         "深い悲しみをきちんと受け止める強さと、そこから優しさを紡ぎ出す豊かな感受性を、あなたは持っているのかもしれません。",
+  "考えさせられる": "物事の奥にある意味をじっくり見つめる知性と、答えが出なくても歩き続けられるしなやかさを、あなたは両方持っているようです。"
+};
 
-function generateDiagnosisName(topTag, secondTag){
-  const theme1 = THEME_STRUCTURE[topTag] || "未分類の構造";
-  const theme2 = secondTag && secondTag !== topTag ? THEME_STRUCTURE[secondTag] : "個の再演への依存";
-  return `『${theme1}と、${theme2}』`;
+// 「カードが告げる今のあなた」「映画オラクル」で使う、その気分を表す柔らかい言葉。
+const FEELING_WORD = {
+  "楽しい":         "弾むような楽しさ",
+  "感動":           "じんわりと込み上げる感動",
+  "リラックス":     "ほっと力を抜きたい気持ち",
+  "ワクワク":       "胸が高鳴るような期待感",
+  "怖い":           "ぞくぞくするような刺激",
+  "美しい":         "うっとりするような美しさへの憧れ",
+  "ドキドキ":       "手に汗握るような高揚感",
+  "笑い":           "くすっと笑える軽やかさ",
+  "悲しい":         "静かに涙したい気持ち",
+  "考えさせられる": "じっくり考えを巡らせたい気分"
+};
+
+function generateDiagnosisName(topTag){
+  return `『${THEME_NAME[topTag] || "まだ名前のない物語"}』`;
 }
 
 function generateDiagnosis(pocketMovies){
@@ -4938,62 +4972,28 @@ function generateDiagnosis(pocketMovies){
   const topTag = sortedTags[0];
   const secondTag = sortedTags[1];
 
-  const intensities = pocketMovies.map(m => intensityAverage(m));
-  const avgIntensity = intensities.reduce((a, b) => a + b, 0) / pocketMovies.length;
-  const minIntensity = Math.min(...intensities);
-  const maxIntensity = Math.max(...intensities);
-  const diagnosisName = generateDiagnosisName(topTag, secondTag);
-  const topTagCount = tagCounts[topTag];
-  const themeNoun = THEME_STRUCTURE[topTag] || "未分類の構造";
+  const diagnosisName = generateDiagnosisName(topTag);
+  const titlesText = pocketMovies.map(m => `「${unescapeHtml(m.title)}」`).join('・');
 
-  let intensityNote;
-  if(maxIntensity - minIntensity >= 35){
-    intensityNote = "感情強度には大きな振れ幅があり、刺激量そのものよりも構造の反復が選択基準として優先されている。";
-  } else if(avgIntensity <= 40){
-    intensityNote = "感情強度は抑制された範囲に留まり、過度な刺激は選択的に排除されている。";
-  } else if(avgIntensity <= 65){
-    intensityNote = "感情強度は中程度の水準で統一されており、極端な選択は回避されている。";
-  } else {
-    intensityNote = "感情強度は高い水準で共通しており、強い刺激そのものが選択の目的と化している。";
-  }
-
-  let continuityNote = "";
-  // state.diagnosisHistoryはDBからcreated_at降順(新しい順)で読み込んでいるので、
-  // 直前の診断は先頭(index 0)にある。
-  const history = state.diagnosisHistory || [];
-  const prev = history[0];
-  if(prev && prev.topTag){
-    continuityNote = prev.topTag === topTag
-      ? "同一の構造は前回の診断でも観測されており、選択傾向は固定化している。"
-      : `前回観測された構造は「${THEME_STRUCTURE[prev.topTag] || prev.topTag}」であり、今回は別の構造に置き換わっている。`;
-  } else {
-    continuityNote = "継続的な観測記録はまだ蓄積されていないが、今回の選択が次の基準点になる。";
-  }
-
-  let secondaryNote;
-  if(secondTag && secondTag !== topTag){
-    const secondThemeNoun = THEME_STRUCTURE[secondTag] || "未分類の構造";
-    secondaryNote = `副次的には、${secondThemeNoun}という傾向も観測される。これは主たる構造を打ち消すものではなく、むしろ補強する形で共存している。`;
-  } else {
-    secondaryNote = "副次的な構造は観測されず、単一の傾向へと収束している選択だった。";
-  }
-
-  const uniqueTagCount = new Set(pocketMovies.flatMap(m => m.tags)).size;
-  const diversityNote = uniqueTagCount <= 3
-    ? "感情の幅は狭く絞り込まれており、これは単なる好みというより一種の指向性として機能している。"
-    : uniqueTagCount <= 6
-    ? "感情の幅にはある程度の広がりが見られるが、軸となる構造は一貫している。"
-    : "感情の幅は広く、複数の欲求が並行して満たされようとしている。";
-
-  const body = [
-    `選ばれた5本に共通するのは、${themeNoun}という構造である。ジャンルの差異は表層に過ぎず、${topTagCount}本がこの構造を共有していた。`,
-    intensityNote,
-    secondaryNote,
-    diversityNote,
-    `あなたはこの作品群を手元に置くことで、${themeNoun}を、映画という装置を通じて継続的に摂取している。`,
-    continuityNote,
-    "次にポケットへ加える一本が、この構造を強化するのか、あるいは崩すのかもまた、記録として残り続ける。"
+  const cardSection = [
+    '✦ カードが告げる今のあなた',
+    `${titlesText}——この5本を選んだあなたの心には、${FEELING_WORD[topTag] || "そのときどきの気分"}がそっと流れていたのかもしれません。`,
+    'その日、その瞬間の感覚を信じて選んだ5本は、まぎれもなくあなただけの物語です。'
   ].join('\n');
+
+  const senseSection = [
+    '✦ あなたの中に眠る「感性の光」',
+    SENSE_LIGHT[topTag] || "誰かと違う、あなただけの感じ方を、あなたはちゃんと持っているようです。"
+  ].join('\n');
+
+  const oracleFeeling = (secondTag && FEELING_WORD[secondTag]) || "これまでとは少し違う気分";
+  const oracleSection = [
+    '✦ 映画オラクル(未来への一歩)',
+    `次にポケットに加える1本は、${oracleFeeling}をそっと連れてきてくれそうです。`,
+    'どんな新しい扉が開くのか、今から少し楽しみにしていてくださいね。'
+  ].join('\n');
+
+  const body = [cardSection, senseSection, oracleSection].join('\n\n');
 
   // 今のあなたへのおすすめ(選んでいない、傾向が近い作品)
   const pickedIds = pocketMovies.map(m => m.id);
