@@ -2278,8 +2278,10 @@ const WANDER_LOGO_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA4QAAAHCC
 document.querySelectorAll('.splash-logo-img, .header-logo-img').forEach(img => { img.src = WANDER_LOGO_B64; });
 
 const TURNSTILE_SITE_KEY = '0x4AAAAAAEyRzv6vqgd53c5F';
-// w342は一覧のカード表示にちょうど良い解像度(高解像度が必要なdetail画面は別途w780等を検討)。
+// w342は一覧のカード表示にちょうど良い解像度。ホームの大きな注目バナーなど
+// 表示サイズが大きい箇所ではw780を使う(movie.posterPathから組み立てる)。
 const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w342';
+const TMDB_IMAGE_BASE_LARGE = 'https://image.tmdb.org/t/p/w780';
 let hasSupabaseSession = false;
 
 // 一部の環境(特にマジックリンクでURLにトークンが付いた状態で開いた直後)で
@@ -3040,8 +3042,14 @@ function applyFeaturedContent(){
   const featured = featuredList[featuredIndex];
   const avg = loveDisplayValue(featured);
 
-  document.getElementById('featured-poster-bg').style.background = featured.posterColor;
-  document.getElementById('featured-poster-bg').textContent = featured.title.charAt(0);
+  const posterBgEl = document.getElementById('featured-poster-bg');
+  if(featured.posterPath){
+    posterBgEl.style.background = `center 20% / cover no-repeat url(${TMDB_IMAGE_BASE_LARGE}${featured.posterPath})`;
+    posterBgEl.textContent = '';
+  } else {
+    posterBgEl.style.background = featured.posterColor;
+    posterBgEl.textContent = featured.title.charAt(0);
+  }
   document.getElementById('featured-title-text').textContent = featured.title;
   document.getElementById('featured-love-text').innerHTML =
     `${HEART_ICON} ${avg.toFixed(1)} ・ ${loveLabel(avg, featured.loveCount)}`;
@@ -4151,6 +4159,7 @@ async function loadMovies(){
         synopsis: row.synopsis || undefined,
         posterColor: POSTER_PALETTE[row.id % POSTER_PALETTE.length],
         posterUrl: row.poster_path ? `${TMDB_IMAGE_BASE}${row.poster_path}` : null,
+        posterPath: row.poster_path || null,
         platforms: [],
         tagVotes: {},
         reviews: [],
