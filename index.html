@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="google-site-verification" content="WBGLlgHQZ3BErZu6rBw-IZLlIY0CSek6CSNZVIE6MCY" />
 <title>Wander ― 気になるものを拾いに行こう</title>
 <meta name="description" content="気分やムードから映画を探せる、あなたのための映画発見サイト。感情タグや雰囲気で検索して、今の気分にぴったりの一本を見つけよう。">
 <link rel="canonical" href="https://wander-8.site/">
@@ -416,9 +417,13 @@
   .review-feed-track{
     display: flex; gap: 16px;
     width: max-content;
-    animation: reviewFeedScroll 45s linear infinite;
+    animation: reviewFeedScroll 90s linear infinite;
   }
-  .review-feed-track:hover{ animation-play-state: paused; }
+  /* ホバーできる端末(マウス)だけ一時停止させる。タッチ端末だと:hoverが
+     タップ後も張り付いたままになり、ループが途中で止まって見えるため。 */
+  @media (hover: hover){
+    .review-feed-track:hover{ animation-play-state: paused; }
+  }
   @keyframes reviewFeedScroll{
     from{ transform: translateX(0); }
     to{ transform: translateX(-50%); }
@@ -519,6 +524,24 @@
     transition: color .2s ease, border-color .2s ease;
   }
   .add-list-icon-btn svg{ width: 18px; height: 18px; }
+  .mini-switch{
+    position: relative;
+    width: 38px; height: 22px;
+    border-radius: 999px;
+    background: var(--line);
+    border: 1px solid var(--line);
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .2s ease, border-color .2s ease;
+  }
+  .mini-switch .mini-switch-knob{
+    position: absolute; top: 2px; left: 2px;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: var(--ink-soft);
+    transition: transform .2s ease, background .2s ease;
+  }
+  .mini-switch.on{ background: rgba(160,132,242,0.35); border-color: var(--gold); }
+  .mini-switch.on .mini-switch-knob{ background: var(--gold); transform: translateX(16px); }
   .add-to-list-panel{
     background: var(--surface); border:1px solid var(--line);
     border-radius: 12px; padding: 14px; margin-bottom: 18px;
@@ -2030,7 +2053,9 @@
           <div class="avatar" id="profile-summary-avatar" style="width:52px;height:52px;font-size:20px; flex-shrink:0;">?</div>
           <div style="min-width:0;">
             <div style="font-family:'M PLUS Rounded 1c', sans-serif; font-weight:700; font-size:24px; overflow-wrap:break-word;" id="profile-summary-name"></div>
-            <div style="display:flex; align-items:center; gap:6px; margin-top:4px;">
+            <!-- 称号表示は一時的に非表示。データ・計算ロジック(computeTrust等)は
+                 残してあるので、この行のdisplay:noneを外せばいつでも復活できる。 -->
+            <div style="display:none; align-items:center; gap:6px; margin-top:4px;">
               <div id="profile-summary-tier-icon" style="width:18px; height:18px; display:flex; align-items:center; justify-content:center;"></div>
               <div class="sub" id="profile-summary-tier-label" style="margin:0;"></div>
             </div>
@@ -2077,14 +2102,6 @@
           <label>プレビュー</label>
           <div class="avatar-preview">
             <div class="avatar" id="p-avatar-preview" style="width:52px;height:52px;font-size:20px;">?</div>
-          </div>
-        </div>
-
-        <div class="trust-info">
-          <div class="trust-info-title">称号について</div>
-          <div class="trust-info-body">
-            レビューや映画の投稿を続けていくと、少しずつ新しい称号がもらえます。称号があると、名前の横に特別なマークが表示されるようになります。<br>
-            次にどんな称号がもらえるかは、投稿しながらのお楽しみに。
           </div>
         </div>
 
@@ -2244,9 +2261,14 @@
   <!-- ============ LISTS OVERVIEW VIEW ============ -->
   <div class="view" id="view-lists">
     <button class="back-btn" onclick="goProfile()">← プロフィールに戻る</button>
-    <div class="detail-head">
-      <h2>マイリスト</h2>
-      <div class="sub">好きな組み合わせで映画をまとめて、共有できます</div>
+    <div class="detail-head" style="display:flex; align-items:flex-start; justify-content:space-between; gap:10px;">
+      <div style="flex:1; min-width:0;">
+        <h2>マイリスト</h2>
+        <div class="sub">好きな組み合わせで映画をまとめて、共有できます</div>
+      </div>
+      <button class="add-list-icon-btn" onclick="shareAllPublicLists()" title="リスト一覧を共有する" style="flex-shrink:0; margin-top:2px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14"/></svg>
+      </button>
     </div>
 
     <div class="form-actions" style="margin-bottom:10px;">
@@ -2269,10 +2291,16 @@
         <input type="text" id="list-name-inline-input" class="field-input" maxlength="12" style="display:none; font-size:20px; font-weight:700; padding:4px 8px;" onblur="confirmInlineRename()" onkeydown="if(event.key==='Enter') this.blur()">
         <div class="sub" id="list-detail-count"></div>
       </div>
-      <div id="list-header-icons" style="display:flex; gap:8px; flex-shrink:0; margin-top:6px;">
+      <div id="list-header-icons" style="display:flex; align-items:center; gap:8px; flex-shrink:0; margin-top:6px;">
         <button class="add-list-icon-btn" id="list-delete-icon-btn" onclick="deleteCurrentList()" title="削除する">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 6h18M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2m3 0-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
         </button>
+        <div id="list-public-toggle-wrap" style="display:flex; align-items:center; gap:6px;">
+          <span class="sub" id="list-public-toggle-label" style="margin:0; white-space:nowrap;">非公開</span>
+          <div class="mini-switch" id="list-public-toggle" onclick="toggleListPublic()" title="公開・非公開を切り替える">
+            <div class="mini-switch-knob"></div>
+          </div>
+        </div>
         <button class="add-list-icon-btn" onclick="shareCurrentList()" title="共有する">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14"/></svg>
         </button>
@@ -2291,6 +2319,17 @@
       <div class="sub" id="shared-list-count"></div>
     </div>
     <div id="shared-list-items" class="pocket-grid"></div>
+    <div class="form-actions" style="margin-top:18px;">
+      <button class="primary-btn" onclick="goHome()">Wanderをもっと見る</button>
+    </div>
+  </div>
+
+  <!-- ============ SHARED LISTS OVERVIEW VIEW(?sharelists=のリンクから開いた第三者向け) ============ -->
+  <div class="view" id="view-shared-lists-profile">
+    <div class="detail-head">
+      <h2 id="shared-lists-profile-name"></h2>
+    </div>
+    <div id="shared-lists-profile-items"></div>
     <div class="form-actions" style="margin-top:18px;">
       <button class="primary-btn" onclick="goHome()">Wanderをもっと見る</button>
     </div>
@@ -2721,9 +2760,18 @@ function emailAuthRedirectUrl(){
   return window.location.origin + window.location.pathname;
 }
 
+// currentUserId()と同じ理由(gotrue-jsのgetUser()が希にハングする)で、
+// ここにもタイムアウトと例外処理を付ける。以前はここが無防備だったため、
+// ハング/失敗するとこの関数を呼んでいる箇所(goProfile()やloadProfile())が
+// そこで止まったり、以降の処理へ進めなくなったりしていた。
 async function currentAuthUser(){
-  const { data: { user } } = await supabase.auth.getUser();
-  return user || null;
+  try{
+    const { data: { user } } = await withTimeout(supabase.auth.getUser(), 6000);
+    return user || null;
+  }catch(err){
+    console.error('ユーザー情報の取得に失敗しました', err);
+    return undefined;
+  }
 }
 
 function confirmLogout(){
@@ -3318,11 +3366,15 @@ function renderHomeRows(){
     // 手でスワイプする他の棚と違い、ここは常に自動で流れ続ける演出にする。
     // シームレスにループさせるため、カード列を2回連続で並べてから
     // ちょうど半分ぶん(=1周ぶん)だけスライドさせる。
+    // 速度はCSS側の固定秒数ではなく枚数に比例させる(1枚あたり約7秒で
+    // 通り過ぎる、ゆっくり読める速さ)。固定秒数だと枚数が多い日ほど
+    // 逆に速く流れてしまい、コメントを読み切れなくなるため。
     const cardsHtml = reviewCards.join('');
+    const marqueeSeconds = Math.max(60, reviewCards.length * 7);
     html += `
       <div class="section-label">みんなの声</div>
       <div class="review-feed-marquee">
-        <div class="review-feed-track">${cardsHtml}${cardsHtml}</div>
+        <div class="review-feed-track" style="animation-duration:${marqueeSeconds}s;">${cardsHtml}${cardsHtml}</div>
       </div>
     `;
   }
@@ -4388,7 +4440,9 @@ async function submitReview(force){
     // Cloudflare Turnstileのトークン検証を通過した場合だけ書き込む。
     // 関数の中では呼び出しユーザー自身のJWTでmovie_reviewsに書き込むため、
     // RLS(1人1映画1行・レート制限・review_countゲート)はそのまま有効。
-    const { data: { session } } = await supabase.auth.getSession();
+    // getSession()にもタイムアウトを付け、gotrue-jsが希にハングする既知の
+    // 不具合で「送信ボタンを押したまま何も起きない」まま止まらないようにする。
+    const { data: { session } } = await withTimeout(supabase.auth.getSession(), 6000);
     const { data, error } = await supabase.functions.invoke('submit-review', {
       body: { movie_id: m.id, review_text: text, captcha_token: reviewTurnstileToken },
       headers: session ? { Authorization: `Bearer ${session.access_token}` } : undefined
@@ -4609,7 +4663,9 @@ async function submitMovie(){
     // submit-movie エッジ関数を経由させ、Turnstileトークン検証を通過した場合だけ
     // 書き込む。関数内では呼び出しユーザー自身のJWTで書き込むため、RLS
     // (added_by=auth.uid()の所有チェック・投稿レート制限)はそのまま有効。
-    const { data: { session } } = await supabase.auth.getSession();
+    // getSession()にもタイムアウトを付け、gotrue-jsが希にハングする既知の
+    // 不具合で「送信ボタンを押したまま何も起きない」まま止まらないようにする。
+    const { data: { session } } = await withTimeout(supabase.auth.getSession(), 6000);
     const { data, error } = await supabase.functions.invoke('submit-movie', {
       body: {
         title,
@@ -4908,11 +4964,16 @@ async function saveProfile(){
 async function loadProfile(){
   try{
     const user = await currentAuthUser();
+    // undefinedは「確認できなかっただけ」(currentAuthUser内のタイムアウト等)。
+    // ここでnullと同じに扱ってstate.profileを消すと、実際には登録済みなのに
+    // プロフィール画面・視聴記録が一時的に丸ごと消えて見える事故になるため、
+    // 判定できるまで今の状態をそのまま残す。
+    if(user === undefined) return;
     if(!user){ state.profile = null; return; }
 
     const { data, error } = await supabase
       .from('profiles')
-      .select('user_name, avatar_color, avatar_photo_url, review_count')
+      .select('user_name, avatar_color, avatar_photo_url, review_count, lists_share_token')
       .eq('id', user.id)
       .single();
     if(error) throw error;
@@ -4950,14 +5011,17 @@ async function loadProfile(){
       avatarPhotoPosX: crop.x,
       avatarPhotoPosY: crop.y,
       reviewCount: data.review_count || 0,
+      listsShareToken: data.lists_share_token,
       excludedWords: (prefs && prefs.excluded_words) || [],
       // レビュー投稿・映画追加・診断結果の保存など、荒らし対策で
       // メール確認済みユーザー限定にしている機能の判定に使う。
       emailVerified: user.is_anonymous === false && !!user.email_confirmed_at
     };
   }catch(err){
+    // profiles/user_search_preferencesへの通信自体に失敗した場合も、未登録扱いに
+    // して消すのではなく、今表示できている内容をそのまま残す(次の読み込みで
+    // 直る一時的な失敗のため)。
     console.error(err);
-    state.profile = null;
   }
 }
 
@@ -5124,7 +5188,6 @@ function updateHeader(){
   const color = (state.profile && state.profile.avatarColor) ? state.profile.avatarColor : '#3a3a40';
   const photo = state.profile && state.profile.avatarPhoto;
   const initial = state.profile ? name.charAt(0) : '?';
-  const { tier } = computeTrust();
 
   const avatarEl = document.getElementById('header-avatar');
   document.getElementById('header-name').textContent = name;
@@ -5139,14 +5202,12 @@ function updateHeader(){
     avatarEl.textContent = initial;
   }
 
+  // 称号バッジは一時的に非表示。computeTrust()自体は投票の重み付け(myVoteWeight)
+  // に引き続き使われているので、tierの計算ロジックはそのまま残してある。
+  // 表示を復活させる時は、上のtier.titleによる出し分けに戻せばよい。
   const markEl = document.getElementById('header-trust');
-  if(tier.title){
-    markEl.innerHTML = `<span class="trust-mark" style="color:${tier.color}">${HEART_ICON}</span>${tier.title}`;
-    markEl.style.display = 'inline-flex';
-  } else {
-    markEl.innerHTML = "";
-    markEl.style.display = 'none';
-  }
+  markEl.innerHTML = "";
+  markEl.style.display = 'none';
 }
 
 function renderColorSwatches(){
@@ -5282,7 +5343,7 @@ let profileEditOpen = false;
 // requireVerifiedUser()/goMagicLogin()で先に止められる)。ただし、登録直後は
 // まだニックネームが未設定(DBトリガーが作った空のプロフィール行のみ)の
 // ことがあるので、その場合はニックネーム登録フォームを先に出す。
-async function goProfile(){
+function goProfile(){
   const existing = state.profile;
   const hasNickname = !!(existing && existing.nickname);
   pendingAvatarColor = existing ? existing.avatarColor : AVATAR_COLORS[0];
@@ -5324,13 +5385,22 @@ async function goProfile(){
     pocketSectionEl.style.display = 'block';
     document.getElementById('logout-btn').style.display = 'block';
 
-    const user = await currentAuthUser();
-    document.getElementById('account-email-linked-address').textContent = user ? user.email : '';
-
     pocketShownCount = POCKET_PAGE_SIZE;
     renderPocketView();
     renderViewingRecord();
     renderExcludedWords();
+
+    // メールアドレスの表示だけはgetUser()(gotrue-jsが希にハングする既知の不具合が
+    // ある通信を伴う呼び出し)に依存している。以前はこれをawaitしてから上の
+    // renderViewingRecord()等を呼んでいたため、ハングすると視聴記録などが
+    // 何も表示されないまま止まって見えた(「たまに消える」の別の原因)。
+    // 表示に必須ではないので、待たずに後から差し込む形にする。
+    currentAuthUser().then(user => {
+      // undefinedは「確認できなかっただけ」なので、既に表示できているメール
+      // アドレスをここで空に消してしまわないよう、その場合は何もしない。
+      if(user === undefined) return;
+      document.getElementById('account-email-linked-address').textContent = user ? user.email : '';
+    }).catch(err => console.error('メールアドレスの取得に失敗しました', err));
   } else {
     summaryEl.style.display = 'none';
     editFormEl.style.display = 'block';
@@ -5357,7 +5427,8 @@ async function submitProfile(){
 
   const previousReviewCount = state.profile ? (state.profile.reviewCount || 0) : 0;
   const previousEmailVerified = state.profile ? !!state.profile.emailVerified : false;
-  state.profile = { nickname, avatarColor: pendingAvatarColor, avatarPhoto: pendingAvatarPhoto, avatarPhotoPosX: pendingAvatarPosX, avatarPhotoPosY: pendingAvatarPosY, reviewCount: previousReviewCount, emailVerified: previousEmailVerified };
+  const previousListsShareToken = state.profile ? state.profile.listsShareToken : undefined;
+  state.profile = { nickname, avatarColor: pendingAvatarColor, avatarPhoto: pendingAvatarPhoto, avatarPhotoPosX: pendingAvatarPosX, avatarPhotoPosY: pendingAvatarPosY, reviewCount: previousReviewCount, emailVerified: previousEmailVerified, listsShareToken: previousListsShareToken };
   await saveProfile();
   updateHeader();
   showToast(isFirstRegistration ? '登録しました' : 'プロフィールを保存しました');
@@ -5834,9 +5905,9 @@ function createNewList(){
 // 呼び出し側でrequireVerifiedUser()済みであることを前提とする。
 async function createUserList(name, initialMovieId){
   const userId = await currentUserId();
-  const { data, error } = await supabase.from('user_lists').insert({ user_id: userId, name }).select('id, share_token').single();
+  const { data, error } = await supabase.from('user_lists').insert({ user_id: userId, name }).select('id, share_token, is_public').single();
   if(error) throw error;
-  const newList = { id: String(data.id), name, shareToken: data.share_token, movieIds: [] };
+  const newList = { id: String(data.id), name, shareToken: data.share_token, isPublic: !!data.is_public, movieIds: [] };
   if(initialMovieId != null){
     const { error: itemErr } = await supabase.from('user_list_items').insert({ list_id: data.id, movie_id: initialMovieId });
     if(itemErr) throw itemErr;
@@ -5893,6 +5964,73 @@ function buildListShareUrl(shareToken){
   return `${window.location.origin}${window.location.pathname}?share=${shareToken}`;
 }
 
+function buildProfileListsShareUrl(profileToken){
+  return `${window.location.origin}${window.location.pathname}?sharelists=${profileToken}`;
+}
+
+// 「マイリスト一覧」をまとめて共有する。公開スイッチをオンにしたリストだけが
+// 相手に見える(get-shared-lists関数側でもis_publicを確認している)ので、
+// 1つも公開していない場合は先にそちらを案内する。
+async function shareAllPublicLists(){
+  if(!requireVerifiedUser()) return;
+  const publicCount = state.myLists.filter(l => l.isPublic).length;
+  if(publicCount === 0){
+    showToast('公開中のリストがありません。まずリストの「公開」スイッチをオンにしてください');
+    return;
+  }
+  const token = state.profile && state.profile.listsShareToken;
+  if(!token){ showToast('共有に失敗しました'); return; }
+
+  const shareUrl = buildProfileListsShareUrl(token);
+  const shareText = `${currentNickname()}のマイリスト\n#Wander で見つけました\n${shareUrl}`;
+
+  if(navigator.share){
+    navigator.share({ title: 'マイリスト', text: shareText }).catch(() => {});
+    return;
+  }
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    try{
+      await navigator.clipboard.writeText(shareText);
+      showToast('共有メッセージとリンクをコピーしました');
+      return;
+    }catch(e){ /* コピー不可な環境なら下のフォールバックへ */ }
+  }
+  showToast('共有に失敗しました');
+}
+
+// 共有リンク(?sharelists=<profile_token>)から開いた第三者向けに、その人が
+// 公開しているリストをまとめて読み込んで表示する。
+async function loadSharedListsProfileView(profileToken){
+  if(!profileToken) return false;
+  try{
+    const { data, error } = await supabase.functions.invoke('get-shared-lists', {
+      body: { profile_token: profileToken }
+    });
+    if(error || !data || data.error) throw error || new Error(data && data.error);
+
+    document.getElementById('shared-lists-profile-name').textContent = `${data.user_name || 'ゲスト'}のマイリスト`;
+    const root = document.getElementById('shared-lists-profile-items');
+    const lists = data.lists || [];
+    if(lists.length === 0){
+      root.innerHTML = '<div class="empty">公開中のリストがまだありません。</div>';
+    } else {
+      root.innerHTML = lists.map(list => {
+        const movies = (list.movie_ids || []).map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
+        if(movies.length === 0) return '';
+        return `
+          <div class="section-label">${escapeHtml(list.name)}</div>
+          <div class="pocket-grid">${movies.map(m => buildCardHTML(m, { overlayTitle: true })).join('')}</div>
+        `;
+      }).join('');
+    }
+    switchView('view-shared-lists-profile');
+    return true;
+  }catch(err){
+    console.error('共有リスト一覧の読み込みに失敗しました', err);
+    return false;
+  }
+}
+
 // 共有リンク(?share=<token>)から開いた第三者向けに、そのリストだけを読み込んで表示する。
 // user_lists/user_list_itemsは本人しか読めないRLSに戻したため、
 // get-shared-list関数(service role)経由でトークンに一致する1件だけを取得する。
@@ -5939,6 +6077,11 @@ function renderListDetail(){
   nameRow.style.cursor = list.isBuiltIn ? 'default' : 'pointer';
   document.getElementById('list-delete-icon-btn').style.display = list.isBuiltIn ? 'none' : 'flex';
   document.getElementById('list-delete-confirm').innerHTML = '';
+
+  // 「あとで観る」はDBの行を持たず共有もできないため、公開スイッチごと出さない
+  document.getElementById('list-public-toggle-wrap').style.display = list.isBuiltIn ? 'none' : 'flex';
+  document.getElementById('list-public-toggle').classList.toggle('on', !!list.isPublic);
+  document.getElementById('list-public-toggle-label').textContent = list.isPublic ? '公開中' : '非公開';
 }
 
 function startInlineRename(){
@@ -5977,6 +6120,24 @@ async function confirmInlineRename(){
   inputEl.style.display = 'none';
   nameEl.style.display = 'block';
   renderListDetail();
+}
+
+// リストの公開/非公開を切り替える。公開にしない限り、共有リンクを知っていても
+// 誰にも見えない(get-shared-list関数側でもis_publicを確認している)。
+async function toggleListPublic(){
+  const list = getCurrentList();
+  if(!list || list.isBuiltIn) return;
+  const nextValue = !list.isPublic;
+  try{
+    const { error } = await supabase.from('user_lists').update({ is_public: nextValue }).eq('id', parseInt(list.id, 10));
+    if(error) throw error;
+    list.isPublic = nextValue;
+    renderListDetail();
+    showToast(nextValue ? 'このリストを公開しました。共有ボタンからリンクを送れます' : '非公開に戻しました');
+  }catch(err){
+    console.error(err);
+    showToast(friendlyErrorMessage(err, '切り替えに失敗しました。通信環境を確認してください。'));
+  }
 }
 
 function deleteCurrentList(){
@@ -6127,6 +6288,14 @@ function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight, maxLines){
 async function shareCurrentList(){
   const list = getCurrentList();
   if(!list) return;
+
+  // 非公開のリストは、リンクを作っても相手には見せない(get-shared-list側で弾く)。
+  // 誤解を防ぐため、先にスイッチを公開にしてもらう。
+  if(!list.isBuiltIn && !list.isPublic){
+    showToast('まず上の「公開」スイッチをオンにしてください');
+    return;
+  }
+
   const movies = list.movieIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
 
   // 「あとで観る」はDBの行を持たないため、共有リンク(そのリストだけを見せるページ)は作れない。
@@ -6262,7 +6431,7 @@ async function loadMyLists(){
     if(!userId){ state.myLists = []; return; }
     const { data, error } = await supabase
       .from('user_lists')
-      .select('id, name, share_token, user_list_items(movie_id)')
+      .select('id, name, share_token, is_public, user_list_items(movie_id)')
       .eq('user_id', userId)
       .order('created_at', { ascending: true });
     if(error) throw error;
@@ -6270,6 +6439,7 @@ async function loadMyLists(){
       id: String(row.id),
       name: row.name,
       shareToken: row.share_token,
+      isPublic: !!row.is_public,
       movieIds: (row.user_list_items || []).map(item => item.movie_id)
     }));
   }catch(err){ state.myLists = []; }
@@ -6652,9 +6822,18 @@ async function init(){
 
   // 共有リンク(?share=<token>)から開かれた場合は、ログイン状態に関わらずそのリストだけを
   // 表示する。MOVIESの読み込み後(=上のPromise.all後)である必要がある。
-  const sharedToken = new URLSearchParams(window.location.search).get('share');
+  const params = new URLSearchParams(window.location.search);
+  const sharedToken = params.get('share');
   if(sharedToken){
     const ok = await loadSharedListView(sharedToken);
+    if(!ok) showToast('リストが見つかりませんでした');
+  }
+
+  // ?sharelists=<token>から開かれた場合は、その人が公開しているリストを
+  // まとめて表示する(単体リストの共有リンクとは別扱い)。
+  const sharedListsToken = params.get('sharelists');
+  if(sharedListsToken){
+    const ok = await loadSharedListsProfileView(sharedListsToken);
     if(!ok) showToast('リストが見つかりませんでした');
   }
 }

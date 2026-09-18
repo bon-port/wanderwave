@@ -41,10 +41,12 @@ Deno.serve(async (req: Request) => {
 
   const { data: list, error: listErr } = await supabase
     .from("user_lists")
-    .select("id, name")
+    .select("id, name, is_public")
     .eq("share_token", shareToken)
     .single();
-  if (listErr || !list) return json({ error: "リストが見つかりませんでした" }, 404);
+  // is_publicがfalseのリストは、リンク(share_token)を知っていても見せない。
+  // 本人がスイッチを切れば、それだけで確実に見えなくなるようにするため。
+  if (listErr || !list || !list.is_public) return json({ error: "リストが見つかりませんでした" }, 404);
 
   const { data: items, error: itemsErr } = await supabase
     .from("user_list_items")
