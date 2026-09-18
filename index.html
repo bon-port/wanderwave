@@ -841,7 +841,35 @@
   .risk-vote-label span{ font-weight:700; }
   .risk-slider{
     width: 100%;
-    transition: accent-color .15s ease;
+    height: 20px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: transparent;
+    cursor: pointer;
+  }
+  .risk-slider::-webkit-slider-runnable-track{
+    height: 8px; border-radius: 6px;
+    background: linear-gradient(90deg, var(--safe) 0 25%, var(--mild) 25% 50%, var(--unsafe) 50% 75%, var(--danger) 75% 100%);
+  }
+  .risk-slider::-moz-range-track{
+    height: 8px; border-radius: 6px;
+    background: linear-gradient(90deg, var(--safe) 0 25%, var(--mild) 25% 50%, var(--unsafe) 50% 75%, var(--danger) 75% 100%);
+  }
+  .risk-slider::-webkit-slider-thumb{
+    -webkit-appearance: none;
+    width: 20px; height: 20px;
+    margin-top: -6px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--ink);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
+  }
+  .risk-slider::-moz-range-thumb{
+    width: 20px; height: 20px;
+    border-radius: 50%;
+    background: #fff;
+    border: 2px solid var(--ink);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.25);
   }
   .risk-vote-hint{
     font-size: 10.5px; color: var(--ink-soft);
@@ -3701,6 +3729,9 @@ function updateIntensityDisplay(value){
   label.textContent = `${riskLabel(value)}(${value}%)`;
   label.style.color = color;
   document.getElementById('intensity-slider').style.accentColor = color;
+  // 「控えめ」を選んでいる間は、暴力・性的・恐怖といった当てはまるものを
+  // 聞かれてもピンと来ないことが多いので、控えめより上を選んだ時だけ出す。
+  document.getElementById('reason-reveal').style.display = value > 25 ? 'block' : 'none';
 }
 
 function onIntensitySliderInput(value){
@@ -5399,6 +5430,7 @@ function onMlIntensityInput(value){
   label.textContent = `${riskLabel(value)}(${value}%)`;
   label.style.color = color;
   document.getElementById('ml-intensity-slider').style.accentColor = color;
+  document.getElementById('ml-reason-reveal').style.display = value > 25 ? 'block' : 'none';
 }
 
 async function saveMyLog(){
