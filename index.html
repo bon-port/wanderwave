@@ -1799,6 +1799,11 @@
     <div class="watch-links" id="d-watch-links"></div>
 
     <div id="d-reviews"></div>
+    <div class="results-pagination" id="reviews-pagination" style="display:none;">
+      <button class="ghost-btn results-pagination-btn" id="reviews-page-prev" onclick="goToReviewsPage(-1)">‹ 前へ</button>
+      <span class="results-pagination-status" id="reviews-pagination-status"></span>
+      <button class="ghost-btn results-pagination-btn" id="reviews-page-next" onclick="goToReviewsPage(1)">次へ ›</button>
+    </div>
 
     <div class="post-panel">
       <button class="post-panel-title post-panel-toggle" onclick="togglePostPanel()">
@@ -4068,9 +4073,14 @@ async function loadMovieTagVotes(m){
 // この映画のレビュー本文一覧(movie_reviews.review_text)を取得して描画する。
 // 一覧全体の集計(愛度・表現度など)はloadMovies()側で既に反映済みなので、
 // ここではレビューカードの表示と、自分の投稿の有無だけを扱う。
+const REVIEWS_PAGE_SIZE = 10;
+let reviewsList = [];
+let reviewsPage = 0;
+
 async function loadMovieReviews(m){
   const reviewsEl = document.getElementById('d-reviews');
   reviewsEl.innerHTML = '<div class="empty" style="padding:16px 0;">読み込み中...</div>';
+  document.getElementById('reviews-pagination').style.display = 'none';
 
   try{
     const userId = await currentUserId();
@@ -4085,14 +4095,9 @@ async function loadMovieReviews(m){
     const reviews = data || [];
     if(state.currentMovieId !== m.id) return; // 別の映画に移動していたら反映しない
 
-    reviewsEl.innerHTML = reviews.length
-      ? reviews.map(r => `
-          <div class="review-card">
-            <div class="r-name">${escapeHtml((r.profiles && r.profiles.user_name) || 'ゲスト')}</div>
-            <div class="r-body">${escapeHtml(r.review_text)}</div>
-          </div>
-        `).join('')
-      : '<div class="empty" style="padding:16px 0;">まだレビューがありません。最初のひとことを書いてみませんか。</div>';
+    reviewsList = reviews;
+    reviewsPage = 0;
+    renderVisibleReviews();
 
     const myReview = userId ? reviews.find(r => r.user_id === userId) : null;
     const textBox = document.getElementById('review-text');
@@ -4112,6 +4117,43 @@ async function loadMovieReviews(m){
     console.error('レビューの読み込みに失敗しました', err);
     reviewsEl.innerHTML = '<div class="empty" style="padding:16px 0;">レビューの読み込みに失敗しました。</div>';
   }
+}
+
+// レビューが増えすぎると1画面がどこまでも長くなってしまうので、検索結果と
+// 同じくページ単位で区切る(件数が少ない間はページ送りUI自体を出さない)。
+function renderVisibleReviews(){
+  const reviewsEl = document.getElementById('d-reviews');
+  const totalPages = Math.max(1, Math.ceil(reviewsList.length / REVIEWS_PAGE_SIZE));
+  reviewsPage = Math.min(Math.max(reviewsPage, 0), totalPages - 1);
+
+  const start = reviewsPage * REVIEWS_PAGE_SIZE;
+  const visible = reviewsList.slice(start, start + REVIEWS_PAGE_SIZE);
+
+  reviewsEl.innerHTML = visible.length
+    ? visible.map(r => `
+        <div class="review-card">
+          <div class="r-name">${escapeHtml((r.profiles && r.profiles.user_name) || 'ゲスト')}</div>
+          <div class="r-body">${escapeHtml(r.review_text)}</div>
+        </div>
+      `).join('')
+    : '<div class="empty" style="padding:16px 0;">まだレビューがありません。最初のひとことを書いてみませんか。</div>';
+
+  const pagination = document.getElementById('reviews-pagination');
+  if(reviewsList.length <= REVIEWS_PAGE_SIZE){
+    pagination.style.display = 'none';
+    return;
+  }
+  pagination.style.display = 'flex';
+  document.getElementById('reviews-pagination-status').textContent =
+    `${reviewsPage + 1} / ${totalPages}ページ(全${reviewsList.length}件)`;
+  document.getElementById('reviews-page-prev').disabled = reviewsPage === 0;
+  document.getElementById('reviews-page-next').disabled = reviewsPage >= totalPages - 1;
+}
+
+function goToReviewsPage(delta){
+  reviewsPage += delta;
+  renderVisibleReviews();
+  document.getElementById('d-reviews').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function updateReviewCount(){
