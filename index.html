@@ -370,6 +370,45 @@
   .result-card:active{
     transform: scale(0.96);
   }
+  .review-feed-card{
+    flex: 0 0 180px;
+    scroll-snap-align: start;
+    cursor: pointer;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 10px;
+  }
+  .review-feed-card:active{ transform: scale(0.97); }
+  .review-feed-poster{
+    width: 44px; height: 62px;
+    border-radius: 6px;
+    overflow: hidden;
+    position: relative;
+    margin-bottom: 8px;
+  }
+  .review-feed-poster img{
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
+  .review-feed-title{
+    font-size: 12px; font-weight: 700; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    margin-bottom: 4px;
+  }
+  .review-feed-name{
+    font-size: 11px; color: var(--love); font-weight: 600;
+    margin-bottom: 4px;
+  }
+  .review-feed-body{
+    font-size: 12.5px; color: var(--ink-soft);
+    line-height: 1.5;
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
   .poster-thumb{
     width: 148px; height: 210px;
     border-radius: 12px;
@@ -2829,6 +2868,25 @@ function unescapeHtml(str){
 }
 
 let MOVIES = [];
+let RECENT_REVIEWS = [];
+
+// ホーム画面下部の「みんなの声」欄用に、直近の(本文付き)レビューを
+// 映画を問わず横断で取得する。取得に失敗しても、個別ページのレビューとは
+// 違って必須の内容ではないので、既存の表示を消さずそのまま残す。
+async function loadRecentReviews(){
+  try{
+    const { data, error } = await supabase
+      .from('movie_reviews')
+      .select('movie_id, review_text, created_at, profiles(user_name)')
+      .not('review_text', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(20);
+    if(error) throw error;
+    RECENT_REVIEWS = data || [];
+  }catch(err){
+    console.error('最近の感想の読み込みに失敗しました', err);
+  }
+}
 
 const HEART_ICON = '<svg class="heart-icon" viewBox="0 0 32 30" fill="currentColor"><path d="M16 27 C6 20 2 13 2 8.5 C2 4 5.5 1 9.5 1 C12.5 1 15 2.8 16 5.5 C17 2.8 19.5 1 22.5 1 C26.5 1 30 4 30 8.5 C30 13 26 20 16 27 Z"/></svg>';
 
@@ -3218,6 +3276,36 @@ function renderHomeRows(){
       <div class="results">${list.map(buildCardHTML).join('')}</div>
     `;
   });
+
+  // 「みんなの声」: 映画を問わず、届いた感想を新着順に横スクロールで見せる。
+  // 実際に投稿された本物のレビューだけを使う(捏造・水増しは一切しない)。
+  // 除外ワードに一致する作品の感想は、他の棚と同じくここにも出さない。
+  const visibleIds = new Set(visibleMovies.map(m => m.id));
+  const reviewCards = RECENT_REVIEWS
+    .filter(r => visibleIds.has(r.movie_id))
+    .map(r => {
+      const m = visibleMovies.find(x => x.id === r.movie_id);
+      if(!m) return null;
+      const snippet = r.review_text.length > 60 ? r.review_text.slice(0, 60) + '…' : r.review_text;
+      const posterImg = m.posterUrl ? `<img src="${m.posterUrl}" alt="" loading="lazy" decoding="async">` : '';
+      return `
+        <div class="review-feed-card" onclick="goDetail(${m.id})">
+          <div class="review-feed-poster" style="background:${m.posterColor}">${posterImg}</div>
+          <div class="review-feed-title">${m.title}</div>
+          <div class="review-feed-name">${escapeHtml((r.profiles && r.profiles.user_name) || 'ゲスト')}</div>
+          <div class="review-feed-body">${escapeHtml(snippet)}</div>
+        </div>
+      `;
+    })
+    .filter(Boolean)
+    .slice(0, 20);
+
+  if(reviewCards.length){
+    html += `
+      <div class="section-label">みんなの声</div>
+      <div class="results">${reviewCards.join('')}</div>
+    `;
+  }
 
   root.innerHTML = html;
 }
@@ -6532,7 +6620,7 @@ async function init(){
   const signInPromise = (!hasSupabaseSession && !sessionCheckFailed && !looksLikeAuthRedirect())
     ? autoSignInAnonymously()
     : Promise.resolve();
-  await Promise.all([signInPromise, loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory()]);
+  await Promise.all([signInPromise, loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory(), loadRecentReviews()]);
 
   renderTagCloud();
   renderResults();
