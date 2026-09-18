@@ -59,9 +59,11 @@ async function tmdbFetch(path: string, params: Record<string, string>) {
 
 async function searchMovie(title: string, year: number | null): Promise<{ result: any; yearCorroborated: boolean } | null> {
   // 年指定つき検索(TMDb側で年フィルタ)がヒットすればそれを信頼する
+  // include_adult:falseで固定(trueだとタイトルの一部一致だけでアダルト作品が
+  // 紛れ込み、無関係な映画に誤ったデータを紐付ける事故になるため)
   if (year) {
     for (const language of ["ja-JP", "en-US"]) {
-      const data = await tmdbFetch("/search/movie", { query: title, include_adult: "true", language, year: String(year) });
+      const data = await tmdbFetch("/search/movie", { query: title, include_adult: "false", language, year: String(year) });
       if (data?.results?.length) return { result: data.results[0], yearCorroborated: true };
     }
   }
@@ -70,7 +72,7 @@ async function searchMovie(title: string, year: number | null): Promise<{ result
   // 同名の無関係な別作品(例: 同じ邦題を持つ低予算作品)を誤って拾わないための安全策。
   const candidates: any[] = [];
   for (const language of ["ja-JP", "en-US"]) {
-    const data = await tmdbFetch("/search/movie", { query: title, include_adult: "true", language });
+    const data = await tmdbFetch("/search/movie", { query: title, include_adult: "false", language });
     if (data?.results?.length) candidates.push(...data.results);
   }
   if (candidates.length === 0) return null;
@@ -168,16 +170,16 @@ Deno.serve(async (req: Request) => {
       const jaWithYear = debug_year
         ? await tmdbFetch("/search/movie", {
           query: debug_title,
-          include_adult: "true",
+          include_adult: "false",
           language: "ja-JP",
           year: String(debug_year),
         })
         : null;
-      const jaNoYear = await tmdbFetch("/search/movie", { query: debug_title, include_adult: "true", language: "ja-JP" });
+      const jaNoYear = await tmdbFetch("/search/movie", { query: debug_title, include_adult: "false", language: "ja-JP" });
       const enWithYear = debug_year
         ? await tmdbFetch("/search/movie", {
           query: debug_title,
-          include_adult: "true",
+          include_adult: "false",
           language: "en-US",
           year: String(debug_year),
         })

@@ -35,16 +35,20 @@ async function tmdbFetch(path: string, params: Record<string, string>) {
   return null;
 }
 
+// include_adult:trueだと、タイトルの一部が偶然一致しただけのアダルト作品が
+// 先頭candidateとして紛れ込み、無関係な映画にその画像が貼られる事故が起きる
+// (実際に「愛のむき出し」にアダルト作品のポスターが誤って設定されていた)。
+// このアプリは一般作品のみを対象にしているため、常にfalseにする。
 async function searchMovie(title: string, year: number | null): Promise<any | null> {
   if (year) {
     for (const language of ["ja-JP", "en-US"]) {
-      const data = await tmdbFetch("/search/movie", { query: title, include_adult: "true", language, year: String(year) });
+      const data = await tmdbFetch("/search/movie", { query: title, include_adult: "false", language, year: String(year) });
       if (data?.results?.length) return data.results[0];
     }
   }
   const candidates: any[] = [];
   for (const language of ["ja-JP", "en-US"]) {
-    const data = await tmdbFetch("/search/movie", { query: title, include_adult: "true", language });
+    const data = await tmdbFetch("/search/movie", { query: title, include_adult: "false", language });
     if (data?.results?.length) candidates.push(...data.results);
   }
   if (candidates.length === 0) return null;
@@ -63,7 +67,7 @@ async function searchMovie(title: string, year: number | null): Promise<any | nu
 // 採用しない)。
 Deno.serve(async (req: Request) => {
   try {
-    const { offset = 0, limit = 50, ids = null } = await req.json().catch(() => ({}));
+    const { offset = 0, limit = 50, ids = null, recheck_all = false } = await req.json().catch(() => ({}));
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
@@ -73,12 +77,16 @@ Deno.serve(async (req: Request) => {
       if (error) throw error;
       todo = data || [];
     } else {
-      const { data, error } = await supabase
+      // recheck_all:true は、include_adult:trueだった頃に誤ってアダルト作品の
+      // ポスターが設定されてしまった行を洗い直すためのモード。poster_path済みの
+      // 行も対象に含め、include_adult:false(修正後)で検索し直して上書きする。
+      let query = supabase
         .from("movies")
         .select("id, title, release_year")
-        .is("poster_path", null)
         .order("id", { ascending: true })
         .range(offset, offset + limit - 1);
+      if (!recheck_all) query = query.is("poster_path", null);
+      const { data, error } = await query;
       if (error) throw error;
       todo = data || [];
     }
@@ -91,6 +99,12 @@ Deno.serve(async (req: Request) => {
         chunk.map(async (m: any) => {
           const match = await searchMovie(m.title, m.release_year);
           if (!match || !match.poster_path) {
+            // recheck_allで(adult除外後は)何もヒットしなくなった場合、以前
+            // 誤って設定された可能性のあるposter_pathを残さずクリアする
+            // (未設定なら元々の感情ポスター/色ブロック表示にフォールバックする)
+            if (recheck_all) {
+              await supabase.from("movies").update({ poster_path: null }).eq("id", m.id);
+            }
             return { movie_id: m.id, title: m.title, matched: false };
           }
           const { error: updateErr } = await supabase

@@ -35,17 +35,19 @@ async function tmdbFetch(path: string, params: Record<string, string>) {
   return null;
 }
 
+// include_adult:falseで固定(trueだとタイトルの一部一致だけでアダルト作品が
+// 紛れ込み、無関係な映画に誤ったデータを紐付ける事故になるため)
 async function searchMovie(title: string, year: number | null): Promise<{ result: any; yearCorroborated: boolean } | null> {
   if (year) {
     for (const language of ["ja-JP", "en-US"]) {
-      const data = await tmdbFetch("/search/movie", { query: title, include_adult: "true", language, year: String(year) });
+      const data = await tmdbFetch("/search/movie", { query: title, include_adult: "false", language, year: String(year) });
       if (data?.results?.length) return { result: data.results[0], yearCorroborated: true };
     }
   }
 
   const candidates: any[] = [];
   for (const language of ["ja-JP", "en-US"]) {
-    const data = await tmdbFetch("/search/movie", { query: title, include_adult: "true", language });
+    const data = await tmdbFetch("/search/movie", { query: title, include_adult: "false", language });
     if (data?.results?.length) candidates.push(...data.results);
   }
   if (candidates.length === 0) return null;
@@ -69,7 +71,7 @@ Deno.serve(async (req: Request) => {
     } = await req.json().catch(() => ({}));
 
     if (debug_title) {
-      const ja = await tmdbFetch("/search/movie", { query: debug_title, include_adult: "true", language: "ja-JP" });
+      const ja = await tmdbFetch("/search/movie", { query: debug_title, include_adult: "false", language: "ja-JP" });
       return new Response(JSON.stringify(ja), { headers: { "Content-Type": "application/json" } });
     }
 
