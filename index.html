@@ -11,9 +11,10 @@
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Wander ― 気になるものを拾いに行こう">
 <meta name="twitter:description" content="気分で映画を見つける、あなたのためのサイト">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Baloo+2:wght@500;600;700;800&family=Limelight&display=swap">
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700&family=Inter:wght@400;500;600;700&family=Baloo+2:wght@500;600;700;800&family=Limelight&display=swap');
-
   :root{
     --bg: #05080f;
     --surface: radial-gradient(ellipse at 30% 0%, #10182499 0%, #0a0e16 60%);
@@ -961,7 +962,7 @@
     z-index: 100;
     clip-path: circle(150% at 50% 50%);
     opacity: 0;
-    animation: splashFadeIn 0.6s ease forwards;
+    animation: splashFadeIn 0.4s ease forwards;
   }
   @keyframes splashFadeIn{
     to{ opacity: 1; }
@@ -971,7 +972,7 @@
        なってから.closingを付けるので、CSS側でさらに遅らせると二重に遅延して
        しまい、.hiddenが先に付いてアニメーションが再生されないまま消えていた
        (発生していたバグの原因)。 */
-    animation: irisClose 0.6s cubic-bezier(.65,0,.35,1) forwards;
+    animation: irisClose 0.4s cubic-bezier(.65,0,.35,1) forwards;
     /* .splashは入場時に opacity:0 → splashFadeInで1 に上げているが、.closingで
        animationをirisCloseに差し替えると、その瞬間にforwardsで保持されていた
        opacity:1が失われ、素の(アニメーションを無視した)opacity:0が復活して
@@ -992,9 +993,9 @@
     height: auto;
     opacity: 0;
     transform: scale(0.9);
-    animation: logoImgIn 0.9s cubic-bezier(.22,.8,.32,1) forwards,
+    animation: logoImgIn 0.5s cubic-bezier(.22,.8,.32,1) forwards,
                logoTwinkle 2.4s ease-in-out 1s infinite;
-    animation-delay: 0.1s, 1s;
+    animation-delay: 0.05s, 0.6s;
   }
   @keyframes logoTwinkle{
     0%, 100%{ filter: drop-shadow(0 0 8px rgba(240,230,207,0.3)); }
@@ -1031,8 +1032,8 @@
     color: #9a958f;
     margin-top: 14px;
     opacity: 0;
-    animation: fadeIn 0.5s ease forwards;
-    animation-delay: 0.85s;
+    animation: fadeIn 0.4s ease forwards;
+    animation-delay: 0.45s;
     letter-spacing: 0.02em;
   }
   @keyframes fadeIn{ to{ opacity:1; } }
@@ -1520,8 +1521,6 @@
     50%{ transform: translateY(-4px) rotate(2deg); }
   }
 </style>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.2/feather.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
 <script src="https://challenges.cloudflare.com/turnstile/v0/api.js" async defer></script>
 </head>
 <body>
@@ -2231,6 +2230,13 @@
   </div>
 </div>
 
+<!-- この2つは以前<head>にあり、ページ本体のHTML(スプラッシュ画面を含む)より
+     先に読み込み・実行されるため、外部CDNの応答待ちの間、画面に何も描画
+     できない時間が発生していた。実行順序は変えずに読み込み位置だけを
+     body最後尾(このすぐ下のインラインscriptの直前)に移し、先にスプラッシュ等の
+     HTMLが解析・描画されるようにする。 -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/feather-icons/4.29.2/feather.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.49.4/dist/umd/supabase.js"></script>
 <script>
 // --- Supabase接続 -----------------------------------------------------
 // profiles(プロフィール)とmovie_logs(視聴ログ)はSupabaseに保存する。
@@ -5832,10 +5838,14 @@ async function init(){
   // ニックネーム登録(=プロフィール作成)とは別物で、これだけで「愛を送る」が使える。
   // ただし、マジックリンクで戻ってきた直後は本物のセッション確立を邪魔しない
   // よう、匿名サインインをスキップする(looksLikeAuthRedirect()参照)。
-  if(!hasSupabaseSession && !looksLikeAuthRedirect()){
-    await autoSignInAnonymously();
-  }
-  await Promise.all([loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory()]);
+  // 匿名サインインはTurnstileの読み込み・実行を待つため数百ms〜数秒かかることが
+  // あるが、映画データなどの読み込みはこれを待つ必要が無い(新規の匿名セッション
+  // にはどのみち既存データが無く、空の結果を返すだけ)。以前はこれをawaitしてから
+  // データ読み込みを開始していたため、その分だけ表示が遅くなっていた。並列化する。
+  const signInPromise = (!hasSupabaseSession && !looksLikeAuthRedirect())
+    ? autoSignInAnonymously()
+    : Promise.resolve();
+  await Promise.all([signInPromise, loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory()]);
 
   renderTagCloud();
   renderResults();
@@ -5860,8 +5870,8 @@ async function init(){
 // (CSS側の余分なanimation-delayと合わさって).hiddenで先にdisplay:noneに
 // なってしまい、再生されないまま消えることがあった。
 const splash = document.getElementById('splash');
-const SPLASH_MIN_MS = 1400; // ロゴ演出が一瞬で終わって見えないための最低表示時間
-const SPLASH_CLOSE_MS = 600; // .splash.closingのirisClose継続時間と合わせる
+const SPLASH_MIN_MS = 700; // ロゴ演出が一瞬で終わって見えないための最低表示時間
+const SPLASH_CLOSE_MS = 400; // .splash.closingのirisClose継続時間と合わせる
 const SPLASH_MAX_MS = 8000; // 何らかの理由でinit()がいつまでも終わらない場合の保険(強制的に閉じる)
 function wait(ms){ return new Promise(resolve => setTimeout(resolve, ms)); }
 
