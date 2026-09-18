@@ -130,7 +130,6 @@
   /* ---- hero / search ---- */
   .hero{ padding: 20px 0 10px; }
   .hero .kicker{ font-size: 12.5px; color: #c5b5e8; margin-bottom: 8px; }
-  .catalog-count{ font-size: 12.5px; color: var(--ink-soft); margin: 6px 0 14px; }
 
   .featured-banner{
     margin-top: 14px;
@@ -1327,18 +1326,6 @@
     font-size: 13.5px; color: var(--ink-soft);
     padding: 6px 0; cursor:pointer;
   }
-  .vibe-hint-link{
-    font-size: 11.5px; opacity: 0.65;
-    padding: 4px 0 0;
-  }
-  .vibe-guide-note{
-    font-size: 12.5px; color: var(--ink-soft);
-    margin-bottom: 14px; line-height: 1.6;
-  }
-  .vibe-guide-chips{
-    display:flex; flex-wrap:wrap; gap: 8px;
-  }
-
   .history-item{
     background: var(--surface); border:1px solid var(--line);
     border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
@@ -1721,13 +1708,11 @@
     <div class="hero">
       <div class="kicker">今日はどんな気分?</div>
       <h1>気分で映画を見つける、<br>あなたのためのサイト</h1>
-      <div class="catalog-count" id="catalog-count"></div>
       <div class="search-box">
-        <input type="text" id="search-input" placeholder="映画名・ジャンルで探す" oninput="onSearchInput()">
+        <input type="text" id="search-input" placeholder="映画名・ジャンル・雰囲気で探す" oninput="onSearchInput()">
         <button class="search-clear-btn" id="search-clear-btn" onclick="clearSearch()" style="display:none;">×</button>
         <button onclick="onSearchInput()">検索</button>
       </div>
-      <button class="link-btn vibe-hint-link" onclick="openVibeGuideModal()">雰囲気(サンバ、ダイナーなど)でも検索できます</button>
       <div class="tag-cloud" id="tag-cloud"></div>
 
       <div class="intensity-filter" id="intensity-filter" style="display:none;">
@@ -2398,17 +2383,6 @@
   </div>
 </div>
 
-<div class="diagnosis-history-overlay" id="vibe-guide-overlay" style="display:none;" onclick="if(event.target===this) closeVibeGuideModal()">
-  <div class="diagnosis-history-drawer" id="vibe-guide-drawer">
-    <div class="diagnosis-history-header">
-      <div class="diagnosis-history-title">雰囲気検索のヒント</div>
-      <button class="diagnosis-history-close" onclick="closeVibeGuideModal()">×</button>
-    </div>
-    <div class="vibe-guide-note">こんな言葉でも検索できます(タップで検索できます)。まだ対応していない言葉もあります。</div>
-    <div id="vibe-guide-chips" class="vibe-guide-chips"></div>
-  </div>
-</div>
-
 <!-- この2つは以前<head>にあり、ページ本体のHTML(スプラッシュ画面を含む)より
      先に読み込み・実行されるため、外部CDNの応答待ちの間、画面に何も描画
      できない時間が発生していた。実行順序は変えずに読み込み位置だけを
@@ -2951,9 +2925,11 @@ function loveLabel(avg, count){
 // 閑散として見えてしまう。空白を「まだ誰も来ていない寂しい場所」ではなく
 // 「一番乗りできる場所」として見せることで、実際の人数を偽らずに前向きな
 // 印象に変える。
-function loveCountText(m, opts){
-  if(m.loveCount > 0) return `${m.loveCount}人が愛を送っています`;
-  return (opts && opts.short) ? 'まだ誰も愛を送っていません' : 'まだ誰も愛を送っていません。一番乗りしてみませんか?';
+// 「まだ誰も愛を送っていません」も、結局は0件であることを言葉で
+// 強調してしまい寂しく見えるとのことなので、0件の時は何も表示しない
+// (ハートのスコア表示側は既に「-」表記になっている)。
+function loveCountText(m){
+  return m.loveCount > 0 ? `${m.loveCount}人が愛を送っています` : '';
 }
 
 // 数字の「0.0」も「0人」と同じくらい寂しく見えるので、実際に1人以上の
@@ -3124,7 +3100,7 @@ function buildCardHTML(m, opts){
         <div class="interest-bar-track"><div class="interest-bar-fill" style="width:${(avg/5)*100}%"></div></div>
         <span class="interest-pct">${HEART_ICON} ${loveScoreText(m)}</span>
       </div>
-      <div class="interest-count">${loveCountText(m, { short: true })}</div>
+      <div class="interest-count">${loveCountText(m)}</div>
     </div>
   `;
 }
@@ -3158,8 +3134,6 @@ function seededShuffle(list, salt){
 
 function renderHomeRows(){
   const root = document.getElementById('home-rows');
-  const countEl = document.getElementById('catalog-count');
-  if(countEl) countEl.textContent = MOVIES.length > 0 ? `現在${MOVIES.length.toLocaleString('ja-JP')}本の作品から探せます` : '';
   if(MOVIES.length === 0){ root.innerHTML = ""; return; }
 
   // 個人の除外ワードに一致する作品は、ホームの棚にも出さない
@@ -3425,6 +3399,7 @@ const VIBE_QUERY_ALIASES = {
   "circus": ["サーカス"],
   "casino": ["カジノ"],
   "train": ["列車の旅", "電車の旅"],
+  "yakuza": ["ヤクザ", "極道"],
 };
 
 function matchesVibeAlias(m, normalizedQuery){
@@ -3604,36 +3579,6 @@ function closeSeriesListModal(){
   setTimeout(() => { overlay.style.display = 'none'; }, 280);
 }
 
-// VIBE_QUERY_ALIASESの各エイリアスの最初の言葉を「使える例」として見せる
-// ガイド。網羅はしていない旨をnoteで正直に断っておく。
-function renderVibeGuideChips(){
-  const root = document.getElementById('vibe-guide-chips');
-  root.innerHTML = Object.values(VIBE_QUERY_ALIASES).map(aliases => {
-    const example = aliases[0];
-    return `<div class="tagchip" onclick="searchFromVibeGuide('${escapeHtml(example)}')">${escapeHtml(example)}</div>`;
-  }).join('');
-}
-
-function searchFromVibeGuide(word){
-  closeVibeGuideModal();
-  document.getElementById('search-input').value = word;
-  onSearchInput();
-}
-
-function openVibeGuideModal(){
-  renderVibeGuideChips();
-  const overlay = document.getElementById('vibe-guide-overlay');
-  const drawer = document.getElementById('vibe-guide-drawer');
-  overlay.style.display = 'flex';
-  drawer.classList.remove('closing');
-}
-
-function closeVibeGuideModal(){
-  const overlay = document.getElementById('vibe-guide-overlay');
-  const drawer = document.getElementById('vibe-guide-drawer');
-  drawer.classList.add('closing');
-  setTimeout(() => { overlay.style.display = 'none'; }, 280);
-}
 
 function showToast(msg){
   const t = document.getElementById('toast');
@@ -3882,7 +3827,7 @@ function updateLoveUI(m){
   const avg = loveDisplayValue(m);
   document.getElementById('d-vote-pct').innerHTML = HEART_ICON + ' ' + loveScoreText(m);
   document.getElementById('d-vote-sub').innerHTML =
-    `<span class="love-label-tag">${loveLabel(avg, m.loveCount)}</span> ・ ${loveCountText(m)}`;
+    `<span class="love-label-tag">${loveLabel(avg, m.loveCount)}</span>${loveCountText(m) ? ` ・ ${loveCountText(m)}` : ''}`;
 
   const myLevel = state.myLove[m.id] || 0;
   const btn = document.getElementById('heart-single-btn');
