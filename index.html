@@ -328,6 +328,11 @@
     position: relative;
     overflow: hidden;
   }
+  .poster-thumb img{
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    object-fit: cover;
+  }
   .poster-thumb-title{
     position: absolute;
     left: 0; right: 0; bottom: 0;
@@ -1374,10 +1379,29 @@
   }
   .diagnosis-history-card{
     background: var(--surface); border: 1px solid var(--line);
-    border-radius: 12px; padding: 14px; margin-bottom: 10px;
+    border-radius: 12px; padding: 14px;
     display:flex; align-items:center; gap: 12px;
+    cursor: pointer;
     transition: opacity .3s ease, transform .3s ease, max-height .3s ease;
   }
+  .diagnosis-history-item{ margin-bottom: 10px; }
+  .diagnosis-history-expand{
+    background: var(--surface); border: 1px solid var(--line); border-top: none;
+    border-radius: 0 0 12px 12px; padding: 4px 14px 14px;
+    margin-top: -1px;
+  }
+  .diagnosis-history-body{
+    font-size: 13px; line-height: 1.8; color: var(--ink); white-space: pre-line;
+    padding-top: 10px; margin-bottom: 10px;
+  }
+  .diagnosis-history-posters{
+    display:grid; grid-template-columns: repeat(3, 1fr); gap: 8px;
+  }
+  .diagnosis-history-posters .poster-thumb{ width:100%; height:auto; aspect-ratio: 2/3; }
+  .diagnosis-history-posters .result-title,
+  .diagnosis-history-posters .result-year,
+  .diagnosis-history-posters .interest-row,
+  .diagnosis-history-posters .interest-count{ display:none; }
   .diagnosis-history-card.removing{
     opacity: 0; transform: scale(0.9);
   }
@@ -1930,7 +1954,7 @@
       <button class="primary-btn diagnosis-run-btn-prominent" id="diagnosis-run-btn" style="width:100%; margin-top:14px;" onclick="runNewDiagnosis()" disabled>診断する</button>
 
       <div id="diagnosis-result" class="pocket-diagnosis" style="display:none;">
-        <div class="pocket-diagnosis-title">🔮 今のあなたのシネマ・テーマ</div>
+        <div class="pocket-diagnosis-title">今のあなたのシネマ・テーマ</div>
         <div class="pocket-diagnosis-name" id="new-diagnosis-name"></div>
         <div class="pocket-diagnosis-text" id="new-diagnosis-text"></div>
         <div id="new-diagnosis-movies" class="diagnosis-result-movies"></div>
@@ -2254,6 +2278,8 @@ const WANDER_LOGO_B64 = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAA4QAAAHCC
 document.querySelectorAll('.splash-logo-img, .header-logo-img').forEach(img => { img.src = WANDER_LOGO_B64; });
 
 const TURNSTILE_SITE_KEY = '0x4AAAAAAEyRzv6vqgd53c5F';
+// w342は一覧のカード表示にちょうど良い解像度(高解像度が必要なdetail画面は別途w780等を検討)。
+const TMDB_IMAGE_BASE = 'https://image.tmdb.org/t/p/w342';
 let hasSupabaseSession = false;
 
 // 一部の環境(特にマジックリンクでURLにトークンが付いた状態で開いた直後)で
@@ -2846,14 +2872,20 @@ function renderMovieCards(root, list, emptyMessage, opts){
 
 // opts.overlayTitle: trueの場合、タイトルを別テキストとしてではなく
 // ポスター画像の上に重ねて表示する(ポケット一覧向け)。
+// TMDbのposter_pathがある作品は実際のポスター画像を表示し、無い作品は
+// 従来通り色ブロック+頭文字にフォールバックする。画像はloading="lazy"で、
+// 画面外のカードは実際にスクロールされるまで読み込まない。
 function buildCardHTML(m, opts){
   const avg = loveDisplayValue(m);
   const overlayTitle = !!(opts && opts.overlayTitle);
+  const hasPoster = !!m.posterUrl;
+  const posterImg = hasPoster ? `<img src="${m.posterUrl}" alt="" loading="lazy" decoding="async">` : '';
+  const initialOrTitle = overlayTitle
+    ? `${hasPoster ? '' : `<span class="poster-thumb-initial">${m.title.charAt(0)}</span>`}<div class="poster-thumb-title">${m.title}</div>`
+    : (hasPoster ? '' : m.title.charAt(0));
   return `
     <div class="result-card" onclick="goDetail(${m.id})">
-      <div class="poster-thumb" style="background:${m.posterColor}">${overlayTitle
-        ? `<span class="poster-thumb-initial">${m.title.charAt(0)}</span><div class="poster-thumb-title">${m.title}</div>`
-        : m.title.charAt(0)}</div>
+      <div class="poster-thumb" style="background:${m.posterColor}">${posterImg}${initialOrTitle}</div>
       ${overlayTitle ? '' : `<div class="result-title">${m.title}</div>`}
       <div class="result-year">${m.year}</div>
       <div class="interest-row">
@@ -4064,7 +4096,7 @@ async function submitMovie(){
 async function loadMovies(){
   try{
     const [moviesRes, statsRes, estimatesRes] = await Promise.all([
-      supabase.from('movies').select('id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis'),
+      supabase.from('movies').select('id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path'),
       supabase.from('movie_review_stats').select('*'),
       supabase.from('movie_expression_estimates').select('movie_id, expression_level, reason_tags')
     ]);
@@ -4099,6 +4131,7 @@ async function loadMovies(){
         country: row.country || undefined,
         synopsis: row.synopsis || undefined,
         posterColor: POSTER_PALETTE[row.id % POSTER_PALETTE.length],
+        posterUrl: row.poster_path ? `${TMDB_IMAGE_BASE}${row.poster_path}` : null,
         platforms: [],
         tagVotes: {},
         reviews: [],
@@ -5588,7 +5621,7 @@ function renderPocketView(){
   const visiblePocket = showAll ? sortedPocket : sortedPocket.slice(0, POCKET_PREVIEW_LIMIT);
 
   const itemsRoot = document.getElementById('pocket-items');
-  renderMovieCards(itemsRoot, visiblePocket, '', { overlayTitle: true });
+  renderMovieCards(itemsRoot, visiblePocket, 'ポケットの中は波が連れ去りました。また追加してみて下さい。', { overlayTitle: true });
 
   const expandBtn = document.getElementById('pocket-expand-btn');
   if(sortedPocket.length > POCKET_PREVIEW_LIMIT){
@@ -5784,17 +5817,33 @@ function renderDiagnosisHistoryList(){
     const d = new Date(h.date);
     const dateStr = `${d.getFullYear()}/${d.getMonth()+1}/${d.getDate()}`;
     const color = TAG_COLORS[h.topTag] || 'var(--line)';
+    const usedMovies = (h.movieIds || []).map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
+    const postersHTML = usedMovies.length
+      ? `<div class="diagnosis-history-posters">${usedMovies.map(m => buildCardHTML(m, { overlayTitle: true })).join('')}</div>`
+      : '';
     return `
-      <div class="diagnosis-history-card" id="diag-history-card-${h.id}">
-        <div class="diagnosis-history-color" style="background:${color};"></div>
-        <div class="diagnosis-history-info">
-          <div class="diagnosis-history-date">${dateStr}</div>
-          <div class="diagnosis-history-name">${h.name}</div>
+      <div class="diagnosis-history-item">
+        <div class="diagnosis-history-card" id="diag-history-card-${h.id}" onclick="toggleDiagnosisHistoryExpand(${h.id})">
+          <div class="diagnosis-history-color" style="background:${color};"></div>
+          <div class="diagnosis-history-info">
+            <div class="diagnosis-history-date">${dateStr}</div>
+            <div class="diagnosis-history-name">${h.name}</div>
+          </div>
+          <button class="diagnosis-history-delete" onclick="event.stopPropagation(); deleteDiagnosisHistoryItem(${h.id})">🗑</button>
         </div>
-        <button class="diagnosis-history-delete" onclick="deleteDiagnosisHistoryItem(${h.id})">🗑</button>
+        <div class="diagnosis-history-expand" id="diag-history-expand-${h.id}" style="display:none;">
+          <div class="diagnosis-history-body">${h.body || ''}</div>
+          ${postersHTML}
+        </div>
       </div>
     `;
   }).join('');
+}
+
+function toggleDiagnosisHistoryExpand(id){
+  const el = document.getElementById(`diag-history-expand-${id}`);
+  if(!el) return;
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
 }
 
 function deleteDiagnosisHistoryItem(id){

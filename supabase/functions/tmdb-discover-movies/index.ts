@@ -177,6 +177,7 @@ Deno.serve(async (req: Request) => {
             cast_members: cast.length ? cast : null,
             country: countries.join("・") || null,
             synopsis: synopsis || null,
+            poster_path: details.poster_path || null,
             tmdb_id: c.id,
             tmdb_vote_count: c.vote_count,
             tmdb_vote_average: c.vote_average,
