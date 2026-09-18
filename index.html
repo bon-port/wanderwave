@@ -3042,12 +3042,12 @@ function renderHomeRows(){
   let html = "";
 
   topTags.forEach(tag => {
-    // 常に同じ上位6本が固定で出続けると単調なので、ある程度評価の高い
-    // プール(上位20本)から、日替わりで6本をピックアップする。
+    // 常に同じ上位12本が固定で出続けると単調なので、ある程度評価の高い
+    // プール(上位30本)から、日替わりで12本をピックアップする。
     const pool = MOVIES.filter(m => m.tags.includes(tag))
       .sort((a, b) => loveAverage(b) - loveAverage(a))
-      .slice(0, 20);
-    const list = seededShuffle(pool, `tag:${tag}`).slice(0, 6);
+      .slice(0, 30);
+    const list = seededShuffle(pool, `tag:${tag}`).slice(0, 12);
     if(list.length === 0) return;
     html += `
       <div class="mood-row-header">
@@ -3062,7 +3062,7 @@ function renderHomeRows(){
   // 日替わりでランダムに紹介する。ある程度情報が揃っている作品に限定して、
   // データが薄すぎる行が混ざらないようにする。
   const hiddenGemsPool = MOVIES.filter(m => m.loveCount <= 1 && (m.synopsis || m.genre));
-  const hiddenGems = seededShuffle(hiddenGemsPool, 'hidden-gems').slice(0, 6);
+  const hiddenGems = seededShuffle(hiddenGemsPool, 'hidden-gems').slice(0, 12);
   if(hiddenGems.length){
     html += `
       <div class="mood-row-header">
@@ -3079,7 +3079,7 @@ function renderHomeRows(){
   const todayStr = new Date().toISOString().slice(0, 10);
   const newReleases = MOVIES.filter(m => m.japanReleaseDate && m.japanReleaseDate <= todayStr)
     .sort((a, b) => b.japanReleaseDate.localeCompare(a.japanReleaseDate) || (b.id - a.id))
-    .slice(0, 6);
+    .slice(0, 12);
   if(newReleases.length){
     html += `
       <div class="section-label">今話題の新作</div>
@@ -3113,7 +3113,15 @@ function renderFeaturedBanner(){
   const root = document.getElementById('featured-banner');
   if(MOVIES.length === 0){ root.innerHTML = ""; return; }
 
-  featuredList = [...MOVIES].sort((a, b) => loveAverage(b) - loveAverage(a)).slice(0, 5);
+  // ずっと同じ上位5本を出し続けると、票が集まった作品にどんどん票が集中し
+  // (見せる→さらに票が集まる、の繰り返しで)、いつまでも同じ顔ぶれで
+  // 固定化してしまう。実際に愛された実績がある作品(loveCount>0)の中から
+  // 上位30本のプールを作り、そこから日替わりで5本をピックアップする。
+  const lovedPool = MOVIES.filter(m => m.loveCount > 0)
+    .sort((a, b) => loveAverage(b) - loveAverage(a))
+    .slice(0, 30);
+  const pool = lovedPool.length > 0 ? lovedPool : [...MOVIES].sort((a, b) => loveAverage(b) - loveAverage(a));
+  featuredList = seededShuffle(pool, 'featured-banner').slice(0, 5);
   if(featuredIndex >= featuredList.length) featuredIndex = 0;
 
   const dots = buildFeaturedDots();
@@ -3124,7 +3132,7 @@ function renderFeaturedBanner(){
         <div class="featured-poster-bg" id="featured-poster-bg"></div>
         <div class="featured-scrim"></div>
         <div class="featured-info">
-          <div class="featured-kicker">今いちばん愛されている作品</div>
+          <div class="featured-kicker">今、愛されている作品</div>
           <div class="featured-title" id="featured-title-text"></div>
           <div class="featured-love" id="featured-love-text"></div>
         </div>
