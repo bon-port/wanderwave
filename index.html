@@ -3262,6 +3262,47 @@ function matchesCountryAlias(m, normalizedQuery){
   });
 }
 
+// 「雰囲気検索」(サンバが出てくる作品、ダイナーの雰囲気の作品、等)向けの
+// 簡易版。TMDbのキーワードは英語のみなので、よくありそうな日本語の言い方を
+// 手作業でいくつか対応させておく(国名検索と同じ方式)。網羅はしていないが、
+// 今後アイデアが出るたびにここへ追加していける。
+const VIBE_QUERY_ALIASES = {
+  "diner": ["ダイナー"],
+  "samba": ["サンバ"],
+  "carnaval": ["カーニバル", "謝肉祭"],
+  "road trip": ["ロードトリップ", "ロードムービー"],
+  "high school": ["学園", "高校生活"],
+  "wedding": ["結婚式"],
+  "christmas": ["クリスマス"],
+  "prison": ["刑務所", "監獄"],
+  "heist": ["強盗もの", "強盗計画"],
+  "boxing": ["ボクシング"],
+  "beach": ["ビーチ", "海辺"],
+  "desert": ["砂漠"],
+  "small town": ["田舎町"],
+  "rock 'n' roll": ["ロックバンド", "バンド活動"],
+  "restaurant": ["レストラン"],
+  "cooking": ["料理"],
+  "ghost": ["幽霊"],
+  "robot": ["ロボット"],
+  "time travel": ["タイムトラベル", "タイムスリップ"],
+  "reunion": ["同窓会"],
+  "prom": ["プロム"],
+  "surfing": ["サーフィン"],
+  "circus": ["サーカス"],
+  "casino": ["カジノ"],
+  "train": ["列車の旅", "電車の旅"],
+};
+
+function matchesVibeAlias(m, normalizedQuery){
+  if(!m.keywords || m.keywords.length === 0 || !normalizedQuery) return false;
+  const kws = m.keywords.map(k => k.toLowerCase());
+  return Object.entries(VIBE_QUERY_ALIASES).some(([keyword, aliases]) => {
+    if(!kws.some(k => k.includes(keyword))) return false;
+    return aliases.some(alias => normalizedQuery.includes(normalizeForSearch(alias)));
+  });
+}
+
 // 検索/タグ絞り込みの結果は、件数が増えても一度にDOMへ描画する枚数が
 // 増えすぎないよう、RESULTS_PAGE_SIZE件ずつページ送りで表示する。
 // (作品を数千本規模に増やす予定があり、絞り込みが緩いと一致件数が
@@ -3302,7 +3343,8 @@ function renderResults(){
       || (m.country && normalizeForSearch(m.country).includes(q))
       || (m.genre && m.genre.some(g => normalizeForSearch(g).includes(q)))
       || (m.synopsis && normalizeForSearch(m.synopsis).includes(q))
-      || matchesCountryAlias(m, q);
+      || matchesCountryAlias(m, q)
+      || matchesVibeAlias(m, q);
     const matchTags = state.activeTags.size === 0 || [...state.activeTags].every(t => m.tags.includes(t));
     // 表現度フィルターは、タグを選んでいるかどうかに関係なく、選択中の
     // バンドだけで判定する(以前はactiveTags.size===0の時に無条件で
@@ -4305,7 +4347,7 @@ async function selectAllRows(table, columns){
 async function loadMovies(){
   try{
     const [moviesData, statsRes, estimatesData] = await Promise.all([
-      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path, japan_release_date'),
+      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path, japan_release_date, keywords'),
       supabase.from('movie_review_stats').select('*'),
       selectAllRows('movie_expression_estimates', 'movie_id, expression_level, reason_tags')
     ]);
@@ -4341,6 +4383,7 @@ async function loadMovies(){
         posterUrl: row.poster_path ? `${TMDB_IMAGE_BASE}${row.poster_path}` : null,
         posterPath: row.poster_path || null,
         japanReleaseDate: row.japan_release_date || null,
+        keywords: row.keywords || [],
         platforms: [],
         tagVotes: {},
         reviews: [],

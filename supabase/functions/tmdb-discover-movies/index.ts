@@ -178,10 +178,11 @@ Deno.serve(async (req: Request) => {
       const chunk = fresh.slice(i, i + CONCURRENCY);
       const chunkRows = await Promise.all(
         chunk.map(async (c: any) => {
-          const [details, credits, releaseDates] = await Promise.all([
+          const [details, credits, releaseDates, keywordsRes] = await Promise.all([
             tmdbFetch(`/movie/${c.id}`, { language: "ja-JP" }),
             tmdbFetch(`/movie/${c.id}/credits`, { language: "ja-JP" }),
             tmdbFetch(`/movie/${c.id}/release_dates`, {}),
+            tmdbFetch(`/movie/${c.id}/keywords`, {}),
           ]);
           if (!details) return null;
 
@@ -198,6 +199,7 @@ Deno.serve(async (req: Request) => {
           const year = details.release_date ? parseInt(String(details.release_date).slice(0, 4), 10) : null;
           const synopsis = (details.overview || "").slice(0, SYNOPSIS_MAX_LEN);
           const japanReleaseDate = extractJapanReleaseDate(releaseDates?.results || []);
+          const keywords = (keywordsRes?.keywords || []).slice(0, 15).map((k: any) => k.name);
 
           return {
             title: details.title || c.title,
@@ -211,6 +213,8 @@ Deno.serve(async (req: Request) => {
             poster_path: details.poster_path || null,
             japan_release_date: japanReleaseDate,
             japan_release_checked_at: new Date().toISOString(),
+            keywords: keywords.length ? keywords : null,
+            keywords_checked_at: new Date().toISOString(),
             tmdb_id: c.id,
             tmdb_vote_count: c.vote_count,
             tmdb_vote_average: c.vote_average,
