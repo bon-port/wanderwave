@@ -156,12 +156,18 @@ Deno.serve(async (req: Request) => {
       debug_title = null,
       debug_year = null,
       debug_release_dates = null,
+      debug_keywords = null,
       persist = false,
     } = await req.json().catch(() => ({}));
 
     if (debug_release_dates) {
       const rd = await tmdbFetch(`/movie/${debug_release_dates}/release_dates`, {});
       return new Response(JSON.stringify(rd), { headers: { "Content-Type": "application/json" } });
+    }
+
+    if (debug_keywords) {
+      const kw = await tmdbFetch(`/movie/${debug_keywords}/keywords`, {});
+      return new Response(JSON.stringify(kw), { headers: { "Content-Type": "application/json" } });
     }
 
     if (debug_title) {
