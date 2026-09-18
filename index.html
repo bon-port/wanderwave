@@ -266,24 +266,6 @@
     font-size: 11.5px; color: var(--ink-soft);
     margin-top: 8px;
   }
-  .intensity-band-row{
-    display:flex; flex-wrap:wrap; gap: 8px;
-  }
-  .intensity-band-chip{
-    border:1.5px solid var(--band-color, var(--line));
-    background: var(--surface);
-    color: var(--band-color, var(--ink-soft));
-    padding: 6px 13px;
-    border-radius: 999px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all .15s ease;
-  }
-  .intensity-band-chip.active{
-    background: var(--band-color, var(--ink-soft));
-    color: #fff;
-  }
   .tagchip{
     border:1px solid var(--line);
     background: var(--surface);
@@ -322,6 +304,19 @@
   .search-results-grid .poster-thumb{
     width: 88%;
     margin: 0 auto;
+  }
+  .results-pagination{
+    display:flex; align-items:center; justify-content:space-between;
+    gap: 10px; margin-top: 16px;
+  }
+  .results-pagination-btn{
+    flex: 0 0 auto; width:auto; padding: 9px 16px;
+  }
+  .results-pagination-btn:disabled{
+    opacity: 0.4; cursor: default;
+  }
+  .results-pagination-status{
+    font-size: 13px; color: var(--ink-soft); flex: 1; text-align:center;
   }
   .results{
     margin-top: 22px;
@@ -1665,15 +1660,20 @@
 
       <div class="intensity-filter" id="intensity-filter" style="display:none;">
         <div class="intensity-filter-label-row">
-          <div class="intensity-filter-label">表現度で絞り込む(複数選択可)</div>
+          <div class="intensity-filter-label">表現度: <span id="intensity-filter-value">こだわらない</span></div>
         </div>
-        <div class="intensity-band-row" id="intensity-band-row"></div>
-        <div class="intensity-filter-caption" id="intensity-filter-caption">選択すると、その表現度の作品だけが表示されます。何も選ばなければ全て表示します</div>
+        <input type="range" id="intensity-filter-slider" class="risk-slider" min="0" max="100" step="25" value="0"
+               oninput="onIntensityFilterInput(this.value)">
+        <div class="intensity-filter-caption" id="intensity-filter-caption">こだわらず全ての作品を表示します</div>
       </div>
     </div>
 
     <div class="search-results-grid" id="results"></div>
-    <button class="ghost-btn" id="results-load-more" style="width:100%; margin-top:14px; display:none;" onclick="loadMoreResults()"></button>
+    <div class="results-pagination" id="results-pagination" style="display:none;">
+      <button class="ghost-btn results-pagination-btn" id="results-page-prev" onclick="goToResultsPage(-1)">‹ 前へ</button>
+      <span class="results-pagination-status" id="results-pagination-status"></span>
+      <button class="ghost-btn results-pagination-btn" id="results-page-next" onclick="goToResultsPage(1)">次へ ›</button>
+    </div>
 
     <div id="home-rows"></div>
   </div>
@@ -2858,7 +2858,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], mySubmittedMovies: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityBands: new Set(), diagnosisHistory: [] };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], mySubmittedMovies: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [] };
 
 
 function riskLabel(v){
@@ -2917,46 +2917,38 @@ function renderTagCloud(){
   const showFilter = state.activeTags.size > 0;
   document.getElementById('intensity-filter').style.display = showFilter ? 'block' : 'none';
   if(showFilter){
-    renderIntensityBandRow();
+    onIntensityFilterInput(document.getElementById('intensity-filter-slider').value);
   } else {
-    // フィルターごと隠すので、選択状態もリセットしておく。そうしないと、
+    // フィルターごと隠すので、値も「こだわらない」に戻しておく。そうしないと、
     // フィルターが見えない状態でも古い選択が検索結果に効き続けてしまう。
-    state.intensityBands.clear();
+    state.intensityFilter = 0;
+    document.getElementById('intensity-filter-slider').value = 0;
   }
 }
 
 // 表現度は元々「この値以下は全部表示」という上限方式だったが、それだと
 // 「控えめだけ見たい」と思っても実際には「控えめ以下(=控えめ含む全部)」に
-// なってしまい、意図がわかりにくかった。バンド(控えめ/軽度/やや強い/強い)ごとの
-// チップ選択にして、選んだ表現度「そのもの」だけに絞り込めるようにする
-// (複数選択可・何も選ばなければ全件表示)。
-const INTENSITY_BANDS = [25, 50, 75, 100];
-
+// なってしまい、意図がわかりにくかった。バー自体は残しつつ、選んだ表現度
+// 「そのもの」だけに絞り込む(0=こだわらない、25/50/75/100=それぞれの表現度のみ)。
 function movieIntensityBand(m){
   return riskCategoryUpperBound(intensityAverage(m));
 }
 
-function renderIntensityBandRow(){
-  const el = document.getElementById('intensity-band-row');
-  el.innerHTML = "";
-  INTENSITY_BANDS.forEach(band => {
-    const chip = document.createElement('div');
-    const isActive = state.intensityBands.has(band);
-    const color = riskCategoryColor(band);
-    chip.className = 'intensity-band-chip' + (isActive ? ' active' : '');
-    chip.style.setProperty('--band-color', color);
-    chip.textContent = riskLabel(band);
-    chip.title = riskCategoryDescription(band);
-    chip.onclick = () => {
-      const wasActive = state.intensityBands.has(band);
-      if(wasActive) state.intensityBands.delete(band);
-      else state.intensityBands.add(band);
-      playTone(wasActive ? 420 : 600, 0.08, 0.07, 'sine');
-      renderIntensityBandRow();
-      renderResults();
-    };
-    el.appendChild(chip);
-  });
+function onIntensityFilterInput(value){
+  state.intensityFilter = parseInt(value, 10);
+  const off = state.intensityFilter === 0;
+  const color = off ? 'var(--plum-btn)' : riskCategoryColor(state.intensityFilter);
+  const label = document.getElementById('intensity-filter-value');
+  label.textContent = off ? 'こだわらない' : riskLabel(state.intensityFilter);
+  label.style.color = color;
+  document.getElementById('intensity-filter-slider').style.accentColor = color;
+
+  const caption = document.getElementById('intensity-filter-caption');
+  caption.textContent = off
+    ? 'こだわらず全ての作品を表示します'
+    : `${riskLabel(state.intensityFilter)}(${riskCategoryDescription(state.intensityFilter)})の作品だけが表示されます`;
+
+  renderResults();
 }
 
 function onSearchInput(){
@@ -3263,13 +3255,16 @@ function matchesCountryAlias(m, normalizedQuery){
 }
 
 // 検索/タグ絞り込みの結果は、件数が増えても一度にDOMへ描画する枚数が
-// 増えすぎないよう、RESULTS_PAGE_SIZE件ずつ「もっと見る」で追加表示する。
+// 増えすぎないよう、RESULTS_PAGE_SIZE件ずつページ送りで表示する。
 // (作品を数千本規模に増やす予定があり、絞り込みが緩いと一致件数が
 //  非常に多くなりうるため。フィルタ自体はMOVIES配列に対する軽量な
 //  JS処理なので、ここで重くなるのは専らDOM描画の枚数)
+// 以前は「もっと見る」で下に継ぎ足す方式だったが、押すたびにページが
+// どんどん長くなり、ボタン自体も下へ下へ追いやられて使いづらかったため、
+// ページ単位で切り替える方式にしている。
 const RESULTS_PAGE_SIZE = 30;
 let resultsFiltered = [];
-let resultsShownCount = RESULTS_PAGE_SIZE;
+let resultsPage = 0;
 
 function renderResults(){
   const root = document.getElementById('results');
@@ -3281,7 +3276,7 @@ function renderResults(){
     // 検索・タグ選択をしてない間は、おすすめの棚だけを見せる
     root.style.display = 'none';
     root.innerHTML = '';
-    document.getElementById('results-load-more').style.display = 'none';
+    document.getElementById('results-pagination').style.display = 'none';
     homeRowsEl.style.display = 'block';
     return;
   }
@@ -3304,34 +3299,42 @@ function renderResults(){
     // 表現度フィルターは、タグを選んでいるかどうかに関係なく、選択中の
     // バンドだけで判定する(以前はactiveTags.size===0の時に無条件で
     // スルーしてしまい、タグなしの文字検索では一切効かないバグがあった)。
-    // 何も選ばれていなければ全件通す。選ばれていれば、そのバンドの作品だけを通す。
-    const matchIntensity = state.intensityBands.size === 0 || state.intensityBands.has(movieIntensityBand(m));
+    // 0(こだわらない)なら全件通す。それ以外はそのバンドの作品だけを通す。
+    const matchIntensity = state.intensityFilter === 0 || movieIntensityBand(m) === state.intensityFilter;
     return matchQuery && matchTags && matchIntensity;
   });
 
   // 検索条件が変わるたびに1ページ目から表示し直す
-  resultsShownCount = RESULTS_PAGE_SIZE;
+  resultsPage = 0;
   renderVisibleResults();
 }
 
 function renderVisibleResults(){
   const root = document.getElementById('results');
-  const visible = resultsFiltered.slice(0, resultsShownCount);
-  renderMovieCards(root, visible, '条件に合う映画が見つかりませんでした。タグを減らすか、表現度の上限を緩めてみましょう。');
+  const totalPages = Math.max(1, Math.ceil(resultsFiltered.length / RESULTS_PAGE_SIZE));
+  resultsPage = Math.min(Math.max(resultsPage, 0), totalPages - 1);
 
-  const moreBtn = document.getElementById('results-load-more');
-  const remaining = resultsFiltered.length - resultsShownCount;
-  if(remaining > 0){
-    moreBtn.style.display = 'block';
-    moreBtn.textContent = `もっと見る(残り${remaining}件)`;
-  } else {
-    moreBtn.style.display = 'none';
+  const start = resultsPage * RESULTS_PAGE_SIZE;
+  const visible = resultsFiltered.slice(start, start + RESULTS_PAGE_SIZE);
+  renderMovieCards(root, visible, '条件に合う映画が見つかりませんでした。タグを減らすか、表現度の絞り込みを外してみましょう。');
+
+  const pagination = document.getElementById('results-pagination');
+  if(resultsFiltered.length <= RESULTS_PAGE_SIZE){
+    pagination.style.display = 'none';
+    return;
   }
+  pagination.style.display = 'flex';
+  document.getElementById('results-pagination-status').textContent =
+    `${resultsPage + 1} / ${totalPages}ページ(全${resultsFiltered.length}件)`;
+  document.getElementById('results-page-prev').disabled = resultsPage === 0;
+  document.getElementById('results-page-next').disabled = resultsPage >= totalPages - 1;
 }
 
-function loadMoreResults(){
-  resultsShownCount += RESULTS_PAGE_SIZE;
+function goToResultsPage(delta){
+  resultsPage += delta;
   renderVisibleResults();
+  // ページを送るたびに一覧の先頭までスクロールし、位置を見失わないようにする
+  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 function renderRecommended(currentMovie){
@@ -4270,18 +4273,25 @@ async function submitMovie(){
 // select()では新しく追加した分(特にTMDb一括取り込み分)が黙って切り捨てられ、
 // 「本数を増やしたのにアプリ側では見えない」事故になっていた。上限に関わらず
 // 全件取得できるよう、1000件ずつページ送りして結合する。
+// ページ送りを1件ずつ直列に待つと、本数が増えるほど(1000件ごとに1往復)
+// 読み込みが遅くなる(5000件超で6往復分が積み重なる)。1ページ目の取得と
+// 同時に件数(count: 'exact')も受け取り、残りのページは並列にまとめて取りに行く。
 async function selectAllRows(table, columns){
   const PAGE_SIZE = 1000;
-  let all = [];
-  let from = 0;
-  while(true){
+  const first = await supabase.from(table).select(columns, { count: 'exact' }).range(0, PAGE_SIZE - 1);
+  if(first.error) throw first.error;
+  const total = first.count ?? (first.data || []).length;
+
+  const remainingStarts = [];
+  for(let from = PAGE_SIZE; from < total; from += PAGE_SIZE) remainingStarts.push(from);
+  if(remainingStarts.length === 0) return first.data || [];
+
+  const rest = await Promise.all(remainingStarts.map(async from => {
     const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE_SIZE - 1);
     if(error) throw error;
-    all = all.concat(data || []);
-    if(!data || data.length < PAGE_SIZE) break;
-    from += PAGE_SIZE;
-  }
-  return all;
+    return data || [];
+  }));
+  return (first.data || []).concat(...rest);
 }
 
 async function loadMovies(){
