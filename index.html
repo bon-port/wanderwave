@@ -1992,8 +1992,8 @@
       <div class="pocket-divider"></div>
 
       <div class="section-label">今、ポケットの中にあるもの</div>
-      <div id="pocket-items" class="pocket-grid"></div>
-      <button class="ghost-btn" id="pocket-expand-btn" style="width:100%; margin-top:10px; display:none;" onclick="togglePocketExpand()"></button>
+      <div id="pocket-items" class="results"></div>
+      <button class="ghost-btn" id="pocket-expand-btn" style="width:100%; margin-top:10px; display:none;" onclick="loadMorePocket()"></button>
 
       <div class="pocket-divider"></div>
 
@@ -4757,6 +4757,7 @@ async function goProfile(){
     const user = await currentAuthUser();
     document.getElementById('account-email-linked-address').textContent = user ? user.email : '';
 
+    pocketShownCount = POCKET_PAGE_SIZE;
     renderPocketView();
     renderViewingRecord();
   } else {
@@ -5033,6 +5034,7 @@ async function deleteMyLogConfirm(){
 }
 
 const POCKET_THRESHOLD = 5;
+const POCKET_DIAGNOSIS_MATERIAL_LIMIT = 9;
 
 function getPocketMovies(){
   return state.myPocket.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
@@ -5041,7 +5043,7 @@ function getPocketMovies(){
 function getDiagnosisMaterial(){
   // ハートの強さは使わない(みんな最大まで押すので差がつかない)。
   // 意図的にポケットへ入れた順=新しいものを優先して材料にする
-  return [...getPocketMovies()].reverse().slice(0, POCKET_PREVIEW_LIMIT);
+  return [...getPocketMovies()].reverse().slice(0, POCKET_DIAGNOSIS_MATERIAL_LIMIT);
 }
 
 function isInPocket(movieId){
@@ -5711,35 +5713,36 @@ function goPocket(){
   goProfile();
 }
 
-const POCKET_PREVIEW_LIMIT = 9;
-let pocketExpanded = false;
+const POCKET_PAGE_SIZE = 9;
+let pocketShownCount = POCKET_PAGE_SIZE;
 
 function renderPocketView(){
   const pocketMovies = getPocketMovies();
 
   renderDiagnosisPicker();
 
-  // 新しく入れたもの順に並べ、多くなりすぎたら最初は一部だけ見せる(ページが嵩張らないように)
+  // 新しく入れたもの順に並べ、他の一覧(検索結果など)と同じく横スライドで表示し、
+  // 増えすぎた場合は「もっと見る」を押した分だけ追加表示する(縦に伸びすぎないように)
   const sortedPocket = [...pocketMovies].reverse();
-  const showAll = pocketExpanded || sortedPocket.length <= POCKET_PREVIEW_LIMIT;
-  const visiblePocket = showAll ? sortedPocket : sortedPocket.slice(0, POCKET_PREVIEW_LIMIT);
+  const visiblePocket = sortedPocket.slice(0, pocketShownCount);
 
   const itemsRoot = document.getElementById('pocket-items');
   renderMovieCards(itemsRoot, visiblePocket, 'ポケットの中は波が連れ去りました。また追加してみて下さい。', { overlayTitle: true });
 
-  const expandBtn = document.getElementById('pocket-expand-btn');
-  if(sortedPocket.length > POCKET_PREVIEW_LIMIT){
-    expandBtn.style.display = 'block';
-    expandBtn.textContent = showAll ? '表示を減らす' : `全部見る(${sortedPocket.length}個)`;
+  const moreBtn = document.getElementById('pocket-expand-btn');
+  const remaining = sortedPocket.length - pocketShownCount;
+  if(remaining > 0){
+    moreBtn.style.display = 'block';
+    moreBtn.textContent = `もっと見る(残り${remaining}個)`;
   } else {
-    expandBtn.style.display = 'none';
+    moreBtn.style.display = 'none';
   }
 
   renderListsGrid('pocket-lists-grid');
 }
 
-function togglePocketExpand(){
-  pocketExpanded = !pocketExpanded;
+function loadMorePocket(){
+  pocketShownCount += POCKET_PAGE_SIZE;
   renderPocketView();
 }
 
