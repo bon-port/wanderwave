@@ -4179,23 +4179,40 @@ async function submitMovie(){
 
 // カタログ本体はmoviesテーブル、みんなの投票の集計はmovie_review_statsビュー
 // (movie_reviewsを映画ごとに集計したもの)から読み込む。
+// SupabaseのREST API(PostgREST)は1回のリクエストで返す行数に既定の上限がある
+// (このプロジェクトでは1000行)。moviesテーブルが1000本を超えた結果、.range()無しの
+// select()では新しく追加した分(特にTMDb一括取り込み分)が黙って切り捨てられ、
+// 「本数を増やしたのにアプリ側では見えない」事故になっていた。上限に関わらず
+// 全件取得できるよう、1000件ずつページ送りして結合する。
+async function selectAllRows(table, columns){
+  const PAGE_SIZE = 1000;
+  let all = [];
+  let from = 0;
+  while(true){
+    const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE_SIZE - 1);
+    if(error) throw error;
+    all = all.concat(data || []);
+    if(!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 async function loadMovies(){
   try{
-    const [moviesRes, statsRes, estimatesRes] = await Promise.all([
-      supabase.from('movies').select('id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path'),
+    const [moviesData, statsRes, estimatesData] = await Promise.all([
+      selectAllRows('movies', 'id, title, release_year, emotion_tags, genre, director, cast_members, country, synopsis, poster_path'),
       supabase.from('movie_review_stats').select('*'),
-      supabase.from('movie_expression_estimates').select('movie_id, expression_level, reason_tags')
+      selectAllRows('movie_expression_estimates', 'movie_id, expression_level, reason_tags')
     ]);
-    if(moviesRes.error) throw moviesRes.error;
     if(statsRes.error) throw statsRes.error;
-    if(estimatesRes.error) throw estimatesRes.error;
 
     const statsByMovie = {};
     (statsRes.data || []).forEach(s => { statsByMovie[s.movie_id] = s; });
     const estimatesByMovie = {};
-    (estimatesRes.data || []).forEach(e => { estimatesByMovie[e.movie_id] = e; });
+    estimatesData.forEach(e => { estimatesByMovie[e.movie_id] = e; });
 
-    MOVIES = (moviesRes.data || []).map(row => {
+    MOVIES = moviesData.map(row => {
       const s = statsByMovie[row.id];
       const intensityCount = s ? Number(s.intensity_count) : 0;
       const estimate = estimatesByMovie[row.id];
