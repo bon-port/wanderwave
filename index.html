@@ -1299,6 +1299,17 @@
     font-size: 13.5px; color: var(--ink-soft);
     padding: 6px 0; cursor:pointer;
   }
+  .vibe-hint-link{
+    font-size: 11.5px; opacity: 0.65;
+    padding: 4px 0 0;
+  }
+  .vibe-guide-note{
+    font-size: 12.5px; color: var(--ink-soft);
+    margin-bottom: 14px; line-height: 1.6;
+  }
+  .vibe-guide-chips{
+    display:flex; flex-wrap:wrap; gap: 8px;
+  }
 
   .history-item{
     background: var(--surface); border:1px solid var(--line);
@@ -1688,6 +1699,7 @@
         <button class="search-clear-btn" id="search-clear-btn" onclick="clearSearch()" style="display:none;">×</button>
         <button onclick="onSearchInput()">検索</button>
       </div>
+      <button class="link-btn vibe-hint-link" onclick="openVibeGuideModal()">雰囲気(サンバ、ダイナーなど)でも検索できます</button>
       <div class="tag-cloud" id="tag-cloud"></div>
 
       <div class="intensity-filter" id="intensity-filter" style="display:none;">
@@ -2350,6 +2362,17 @@
       <button class="diagnosis-history-close" onclick="closeSeriesListModal()">×</button>
     </div>
     <div id="series-list-items" class="pocket-grid"></div>
+  </div>
+</div>
+
+<div class="diagnosis-history-overlay" id="vibe-guide-overlay" style="display:none;" onclick="if(event.target===this) closeVibeGuideModal()">
+  <div class="diagnosis-history-drawer" id="vibe-guide-drawer">
+    <div class="diagnosis-history-header">
+      <div class="diagnosis-history-title">雰囲気検索のヒント</div>
+      <button class="diagnosis-history-close" onclick="closeVibeGuideModal()">×</button>
+    </div>
+    <div class="vibe-guide-note">こんな言葉でも検索できます(タップで検索できます)。まだ対応していない言葉もあります。</div>
+    <div id="vibe-guide-chips" class="vibe-guide-chips"></div>
   </div>
 </div>
 
@@ -3538,6 +3561,37 @@ function openSeriesListModal(seriesName, movieIds){
 function closeSeriesListModal(){
   const overlay = document.getElementById('series-list-overlay');
   const drawer = document.getElementById('series-list-drawer');
+  drawer.classList.add('closing');
+  setTimeout(() => { overlay.style.display = 'none'; }, 280);
+}
+
+// VIBE_QUERY_ALIASESの各エイリアスの最初の言葉を「使える例」として見せる
+// ガイド。網羅はしていない旨をnoteで正直に断っておく。
+function renderVibeGuideChips(){
+  const root = document.getElementById('vibe-guide-chips');
+  root.innerHTML = Object.values(VIBE_QUERY_ALIASES).map(aliases => {
+    const example = aliases[0];
+    return `<div class="tagchip" onclick="searchFromVibeGuide('${escapeHtml(example)}')">${escapeHtml(example)}</div>`;
+  }).join('');
+}
+
+function searchFromVibeGuide(word){
+  closeVibeGuideModal();
+  document.getElementById('search-input').value = word;
+  onSearchInput();
+}
+
+function openVibeGuideModal(){
+  renderVibeGuideChips();
+  const overlay = document.getElementById('vibe-guide-overlay');
+  const drawer = document.getElementById('vibe-guide-drawer');
+  overlay.style.display = 'flex';
+  drawer.classList.remove('closing');
+}
+
+function closeVibeGuideModal(){
+  const overlay = document.getElementById('vibe-guide-overlay');
+  const drawer = document.getElementById('vibe-guide-drawer');
   drawer.classList.add('closing');
   setTimeout(() => { overlay.style.display = 'none'; }, 280);
 }
