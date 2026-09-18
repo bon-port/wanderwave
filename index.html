@@ -2216,13 +2216,21 @@
         <textarea id="contact-body" rows="5" placeholder="気になったこと、直してほしいところなど、なんでも書いてください"></textarea>
       </div>
 
-      <div class="note">
-        送信すると、お使いのメールアプリが開いて下書きが用意されます。このバージョンではフォームから直接は送信されません。
+      <div class="field">
+        <label>返信用メールアドレス(任意)</label>
+        <input class="field-input" id="contact-email" type="email" placeholder="返信が必要な場合のみ">
       </div>
+
+      <div class="field">
+        <label>認証</label>
+        <div id="contact-turnstile-widget"></div>
+      </div>
+
+      <div class="note" id="contact-error" style="display:none; color:#e2647f;"></div>
 
       <div class="form-actions">
         <div class="contact-submit-wrap" id="contact-submit-wrap" style="position:relative; display:inline-block;">
-          <button class="primary-btn" onclick="submitContact()">送信する</button>
+          <button class="primary-btn" id="contact-submit-btn" onclick="submitContact()">送信する</button>
         </div>
       </div>
     </div>
@@ -2383,6 +2391,39 @@ function renderReviewTurnstile(retriesLeft){
     callback: (token) => { reviewTurnstileToken = token; },
     'expired-callback': () => { reviewTurnstileToken = null; },
     'error-callback': () => { reviewTurnstileToken = null; }
+  });
+}
+
+// お問い合わせフォーム用のTurnstileウィジェット。goContact()で画面を開くたびに呼ぶ。
+let contactTurnstileWidgetId = null;
+let contactTurnstileToken = null;
+
+function renderContactTurnstile(retriesLeft){
+  if(retriesLeft === undefined) retriesLeft = 25;
+  contactTurnstileToken = null;
+
+  if(typeof turnstile === 'undefined'){
+    if(retriesLeft <= 0){
+      console.error('Turnstileの読み込みに失敗しました');
+      return;
+    }
+    setTimeout(() => renderContactTurnstile(retriesLeft - 1), 200);
+    return;
+  }
+
+  const container = document.getElementById('contact-turnstile-widget');
+  if(!container) return;
+
+  if(contactTurnstileWidgetId !== null){
+    turnstile.reset(contactTurnstileWidgetId);
+    return;
+  }
+
+  contactTurnstileWidgetId = turnstile.render(container, {
+    sitekey: TURNSTILE_SITE_KEY,
+    callback: (token) => { contactTurnstileToken = token; },
+    'expired-callback': () => { contactTurnstileToken = null; },
+    'error-callback': () => { contactTurnstileToken = null; }
   });
 }
 
@@ -5917,11 +5958,14 @@ function goTerms(){
 
 function goContact(){
   document.getElementById('contact-body').value = "";
+  document.getElementById('contact-email').value = "";
+  document.getElementById('contact-error').style.display = 'none';
   contactCategory = "バグ報告";
   document.querySelectorAll('#contact-category-select .tagchip').forEach(chip => {
     chip.classList.toggle('active', chip.dataset.cat === contactCategory);
   });
   switchView('view-contact');
+  renderContactTurnstile();
 }
 
 const contactCategoryEl = document.getElementById('contact-category-select');
@@ -5946,17 +5990,48 @@ function celebrateSubmission(anchorEl, message){
   if(navigator.vibrate) navigator.vibrate([15, 30, 15, 30, 40]);
 }
 
-function submitContact(){
+async function submitContact(){
   const body = document.getElementById('contact-body').value.trim();
-  if(!body){ showToast('内容を入力してください'); return; }
+  const email = document.getElementById('contact-email').value.trim();
+  const errorNote = document.getElementById('contact-error');
+  errorNote.style.display = 'none';
 
-  const subject = encodeURIComponent(`【Wander】${contactCategory}`);
-  const bodyText = encodeURIComponent(
-    `カテゴリ: ${contactCategory}\nニックネーム: ${currentNickname()}\n\n${body}`
-  );
-  window.location.href = `mailto:contact@wanderwave.example?subject=${subject}&body=${bodyText}`;
-  showToast('メールアプリを開いています…');
-  celebrateSubmission(document.getElementById('contact-submit-wrap'), 'ありがとうございます');
+  if(!body){ showToast('内容を入力してください'); return; }
+  if(!contactTurnstileToken){ showToast('CAPTCHA認証を完了してください'); return; }
+
+  const btn = document.getElementById('contact-submit-btn');
+  btn.disabled = true;
+  const originalLabel = btn.textContent;
+  btn.textContent = '送信中…';
+
+  try{
+    const { data, error } = await supabase.functions.invoke('submit-contact', {
+      body: {
+        category: contactCategory,
+        body,
+        reply_email: email || undefined,
+        nickname: currentNickname(),
+        captcha_token: contactTurnstileToken
+      }
+    });
+    if(error) throw error;
+    if(data && data.error) throw new Error(data.error);
+
+    showToast('送信しました。ありがとうございます');
+    celebrateSubmission(document.getElementById('contact-submit-wrap'), 'ありがとうございます');
+    document.getElementById('contact-body').value = "";
+    document.getElementById('contact-email').value = "";
+  }catch(err){
+    console.error('お問い合わせの送信に失敗しました', err);
+    errorNote.textContent = '✕ ' + friendlyErrorMessage(err, '送信に失敗しました。時間をおいて再度お試しください。');
+    errorNote.style.display = 'block';
+    showToast('送信に失敗しました');
+  }finally{
+    if(contactTurnstileWidgetId !== null) turnstile.reset(contactTurnstileWidgetId);
+    contactTurnstileToken = null;
+    btn.disabled = false;
+    btn.textContent = originalLabel;
+  }
 }
 
 async function init(){
