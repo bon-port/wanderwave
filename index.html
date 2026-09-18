@@ -2923,6 +2923,12 @@ function loveCountText(m, opts){
   return (opts && opts.short) ? 'まだ誰も愛を送っていません' : 'まだ誰も愛を送っていません。一番乗りしてみませんか?';
 }
 
+// 数字の「0.0」も「0人」と同じくらい寂しく見えるので、実際に1人以上の
+// データがある時だけ数値を出す(無い場合はハートマークだけ、または「-」)。
+function loveScoreText(m){
+  return m.loveCount > 0 ? loveDisplayValue(m).toFixed(1) : '-';
+}
+
 const REASON_INFO = {
   violence: { label: "暴力", criteria: "殴る・刺す・出血など、身体的な暴力やグロテスクな描写のこと。" },
   sexual:   { label: "性的", criteria: "キスシーン・ラブシーン・性的なほのめかしなど、性的表現のこと。感じ方には個人差が大きいため、不安な場合はレビューも合わせて確認してください。" },
@@ -3083,7 +3089,7 @@ function buildCardHTML(m, opts){
       <div class="result-year">${m.year}</div>
       <div class="interest-row">
         <div class="interest-bar-track"><div class="interest-bar-fill" style="width:${(avg/5)*100}%"></div></div>
-        <span class="interest-pct">${HEART_ICON} ${avg.toFixed(1)}</span>
+        <span class="interest-pct">${HEART_ICON} ${loveScoreText(m)}</span>
       </div>
       <div class="interest-count">${loveCountText(m, { short: true })}</div>
     </div>
@@ -3838,7 +3844,7 @@ function toggleReasonTag(key){
 
 function updateLoveUI(m){
   const avg = loveDisplayValue(m);
-  document.getElementById('d-vote-pct').innerHTML = HEART_ICON + ' ' + avg.toFixed(1);
+  document.getElementById('d-vote-pct').innerHTML = HEART_ICON + ' ' + loveScoreText(m);
   document.getElementById('d-vote-sub').innerHTML =
     `<span class="love-label-tag">${loveLabel(avg, m.loveCount)}</span> ・ ${loveCountText(m)}`;
 
