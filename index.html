@@ -2843,6 +2843,15 @@ function loveLabel(avg, count){
   return "殿堂入り級の愛";
 }
 
+// 「0人が愛を送っています」とそのまま出すと、その作品(というよりサイト全体)が
+// 閑散として見えてしまう。空白を「まだ誰も来ていない寂しい場所」ではなく
+// 「一番乗りできる場所」として見せることで、実際の人数を偽らずに前向きな
+// 印象に変える。
+function loveCountText(m, opts){
+  if(m.loveCount > 0) return `${m.loveCount}人が愛を送っています`;
+  return (opts && opts.short) ? 'まだ誰も愛を送っていません' : 'まだ誰も愛を送っていません。一番乗りしてみませんか?';
+}
+
 const REASON_INFO = {
   violence: { label: "暴力", criteria: "殴る・刺す・出血など、身体的な暴力やグロテスクな描写のこと。" },
   sexual:   { label: "性的", criteria: "キスシーン・ラブシーン・性的なほのめかしなど、性的表現のこと。感じ方には個人差が大きいため、不安な場合はレビューも合わせて確認してください。" },
@@ -3005,7 +3014,7 @@ function buildCardHTML(m, opts){
         <div class="interest-bar-track"><div class="interest-bar-fill" style="width:${(avg/5)*100}%"></div></div>
         <span class="interest-pct">${HEART_ICON} ${avg.toFixed(1)}</span>
       </div>
-      <div class="interest-count">${m.loveCount}人が愛を送っています</div>
+      <div class="interest-count">${loveCountText(m, { short: true })}</div>
     </div>
   `;
 }
@@ -3689,7 +3698,7 @@ function updateLoveUI(m){
   const avg = loveDisplayValue(m);
   document.getElementById('d-vote-pct').innerHTML = HEART_ICON + ' ' + avg.toFixed(1);
   document.getElementById('d-vote-sub').innerHTML =
-    `<span class="love-label-tag">${loveLabel(avg, m.loveCount)}</span> ・ ${m.loveCount}人が愛を送っています`;
+    `<span class="love-label-tag">${loveLabel(avg, m.loveCount)}</span> ・ ${loveCountText(m)}`;
 
   const myLevel = state.myLove[m.id] || 0;
   const btn = document.getElementById('heart-single-btn');
