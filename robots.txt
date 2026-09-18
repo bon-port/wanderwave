@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://wander-8.site/sitemap.xml
