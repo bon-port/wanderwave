@@ -3002,9 +3002,11 @@ function renderHomeRows(){
     `;
   });
 
-  // 「今話題の新作」は日本で未公開の作品が混ざると不自然なので、
-  // 日本公開日が判明している作品(japanReleaseDate)だけを対象に、公開日が新しい順に選ぶ。
-  const newReleases = MOVIES.filter(m => m.japanReleaseDate)
+  // 「今話題の新作」は日本で未公開の作品(公開日が無い、または公開日がまだ来ていない
+  // 予定作品)が混ざると不自然なので、公開日が判明していて、かつ今日以前の作品だけを
+  // 対象に、公開日が新しい順に選ぶ。
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const newReleases = MOVIES.filter(m => m.japanReleaseDate && m.japanReleaseDate <= todayStr)
     .sort((a, b) => b.japanReleaseDate.localeCompare(a.japanReleaseDate) || (b.id - a.id))
     .slice(0, 6);
   if(newReleases.length){
