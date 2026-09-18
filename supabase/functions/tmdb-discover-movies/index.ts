@@ -99,6 +99,25 @@ function normalizeTitle(t: string): string {
   return (t || "").trim().toLowerCase();
 }
 
+// SupabaseのREST APIは1回のリクエストで最大1000行までしか返さない。moviesが
+// 1000本を超えた状態で.range()無しにselectすると、重複チェック用の一覧が
+// 黙って切り詰められ、既存作品を見落として重複行を挿入してしまう
+// (moviesにはtitle+release_yearのユニーク制約が無いため、これは検出されずに
+// 静かに成功してしまう)。1000件ずつページ送りして必ず全件取得する。
+async function selectAllRows(supabase: any, table: string, columns: string): Promise<any[]> {
+  const PAGE_SIZE = 1000;
+  let all: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 Deno.serve(async (req: Request) => {
   try {
     const {
@@ -111,12 +130,9 @@ Deno.serve(async (req: Request) => {
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
 
     // 重複チェック用に既存作品の(タイトル正規化, 公開年)を一度だけ取得しておく
-    const { data: existingRows, error: existingErr } = await supabase
-      .from("movies")
-      .select("title, release_year");
-    if (existingErr) throw existingErr;
+    const existingRows = await selectAllRows(supabase, "movies", "title, release_year");
     const existingKeys = new Set(
-      (existingRows || []).map((r: any) => `${normalizeTitle(r.title)}|${r.release_year}`),
+      existingRows.map((r: any) => `${normalizeTitle(r.title)}|${r.release_year}`),
     );
 
     // 1) TMDbのdiscoverでページ分の候補一覧を取得

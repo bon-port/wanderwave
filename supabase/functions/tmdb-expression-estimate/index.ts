@@ -31,6 +31,24 @@ function sleep(ms: number) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// SupabaseのREST APIは1回のリクエストで最大1000行までしか返さない。
+// movie_expression_estimatesが1000行を超えた状態で.range()無しにselectすると、
+// 既に推定済みのidを見落としてtodoに混入し、movie_id(主キー)重複で
+// INSERTが失敗する原因になる。1000件ずつページ送りして必ず全件取得する。
+async function selectAllRows(supabase: any, table: string, columns: string): Promise<any[]> {
+  const PAGE_SIZE = 1000;
+  let all: any[] = [];
+  let from = 0;
+  while (true) {
+    const { data, error } = await supabase.from(table).select(columns).range(from, from + PAGE_SIZE - 1);
+    if (error) throw error;
+    all = all.concat(data || []);
+    if (!data || data.length < PAGE_SIZE) break;
+    from += PAGE_SIZE;
+  }
+  return all;
+}
+
 async function tmdbFetch(path: string, params: Record<string, string>) {
   const url = new URL(`https://api.themoviedb.org/3${path}`);
   url.searchParams.set("api_key", TMDB_KEY);
@@ -207,8 +225,8 @@ Deno.serve(async (req: Request) => {
         .range(offset, offset + limit - 1);
       if (error) throw error;
 
-      const { data: existing } = await supabase.from("movie_expression_estimates").select("movie_id");
-      const existingIds = new Set((existing || []).map((e: any) => e.movie_id));
+      const existing = await selectAllRows(supabase, "movie_expression_estimates", "movie_id");
+      const existingIds = new Set(existing.map((e: any) => e.movie_id));
       todo = (movies || []).filter((m: any) => !existingIds.has(m.id));
     }
 
