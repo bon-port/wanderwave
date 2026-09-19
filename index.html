@@ -1813,7 +1813,7 @@
 
   <!-- ============ DETAIL VIEW ============ -->
   <div class="view" id="view-detail">
-    <button class="back-btn" onclick="goHome()">← 一覧に戻る</button>
+    <button class="back-btn" id="d-back-btn" onclick="goDetailBack()">← 一覧に戻る</button>
 
     <div class="detail-poster" id="d-poster">
       <div class="poster-mood-blur" id="poster-mood-blur"></div>
@@ -2140,6 +2140,7 @@
         <button class="link-btn" onclick="goMyLogForm()">+ 記録を書く</button>
       </div>
       <div id="viewing-record-list"></div>
+      <button class="link-btn diagnosis-history-link" id="viewing-record-more-btn" style="display:none;" onclick="openViewingRecordModal()"></button>
 
       <div class="pocket-divider"></div>
 
@@ -2475,6 +2476,16 @@
   </div>
 </div>
 
+<div class="diagnosis-history-overlay" id="viewing-record-overlay" style="display:none;" onclick="if(event.target===this) closeViewingRecordModal()">
+  <div class="diagnosis-history-drawer" id="viewing-record-drawer">
+    <div class="diagnosis-history-header">
+      <div class="diagnosis-history-title">視聴記録</div>
+      <button class="diagnosis-history-close" onclick="closeViewingRecordModal()">×</button>
+    </div>
+    <div id="viewing-record-grid" class="pocket-grid"></div>
+  </div>
+</div>
+
 <!-- この2つは以前<head>にあり、ページ本体のHTML(スプラッシュ画面を含む)より
      先に読み込み・実行されるため、外部CDNの応答待ちの間、画面に何も描画
      できない時間が発生していた。実行順序は変えずに読み込み位置だけを
@@ -2555,14 +2566,38 @@ function looksLikeAuthRedirect(){
 // 空にリセットしてしまうことがあった(=「たまに消える」の正体)。
 // 「本当に未ログイン」(null)と「確認できなかっただけ」(undefined)を
 // 呼び出し側が区別できるようにする。
-async function currentUserId(){
-  try{
-    const { data: { user } } = await withTimeout(supabase.auth.getUser(), 6000);
-    return user ? user.id : null;
-  }catch(err){
-    console.error('ユーザー情報の取得に失敗しました', err);
-    return undefined;
+//
+// アプリ起動時はinit()がloadMyReviews/loadMyLogs/loadMySubmittedMovies等を
+// Promise.allで並列に走らせるため、以前は各関数が個別にgetUser()を呼び、
+// 同時に6〜8本ものgotrue-jsリクエストが飛んでいた。ハングは希にしか起きなくても、
+// これだけ並列に叩けばどれか1本が引っかかる確率は跳ね上がる上、そこだけ
+// state(myLogs等)が空のまま残り、以後ページ遷移しても再取得されず
+// 直らない(「たまに消える」がリロードのたびに再発する)原因になっていた。
+// 同時に呼ばれたcurrentAuthUser()は1本のリクエストに束ね(in-flight共有)、
+// 解決後はキャッシュを持たずにリセットする(ログイン状態が変わった後の
+// 呼び出しは常に取り直す)。
+let authUserRequest = null;
+
+async function currentAuthUser(){
+  if(!authUserRequest){
+    authUserRequest = (async () => {
+      try{
+        const { data: { user } } = await withTimeout(supabase.auth.getUser(), 6000);
+        return user || null;
+      }catch(err){
+        console.error('ユーザー情報の取得に失敗しました', err);
+        return undefined;
+      }
+    })();
+    authUserRequest.finally(() => { authUserRequest = null; });
   }
+  return authUserRequest;
+}
+
+async function currentUserId(){
+  const user = await currentAuthUser();
+  if(user === undefined) return undefined;
+  return user ? user.id : null;
 }
 
 // レビュー投稿フォーム用のTurnstileウィジェット(プロフィール登録用とは別インスタンス)。
@@ -2758,20 +2793,6 @@ async function autoSignInAnonymously(){
 
 function emailAuthRedirectUrl(){
   return window.location.origin + window.location.pathname;
-}
-
-// currentUserId()と同じ理由(gotrue-jsのgetUser()が希にハングする)で、
-// ここにもタイムアウトと例外処理を付ける。以前はここが無防備だったため、
-// ハング/失敗するとこの関数を呼んでいる箇所(goProfile()やloadProfile())が
-// そこで止まったり、以降の処理へ進めなくなったりしていた。
-async function currentAuthUser(){
-  try{
-    const { data: { user } } = await withTimeout(supabase.auth.getUser(), 6000);
-    return user || null;
-  }catch(err){
-    console.error('ユーザー情報の取得に失敗しました', err);
-    return undefined;
-  }
 }
 
 function confirmLogout(){
@@ -3091,7 +3112,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], mySubmittedMovieIds: [], mySubmittedMovies: [], lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [] };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myReviewRowsLoaded: false, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], myLogsLoaded: false, mySubmittedMovieIds: [], mySubmittedMovies: [], mySubmittedMoviesLoaded: false, lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [] };
 
 
 function riskLabel(v){
@@ -3211,6 +3232,8 @@ function renderMovieCards(root, list, emptyMessage, opts){
 
 // opts.overlayTitle: trueの場合、タイトルを別テキストとしてではなく
 // ポスター画像の上に重ねて表示する(ポケット一覧向け)。
+// opts.returnTo: 指定すると、このカードから開いた詳細ページの「戻る」が
+// 一覧ではなくこの作品IDの詳細ページに戻るようになる(シリーズ棚向け)。
 // TMDbのposter_pathがある作品は実際のポスター画像を表示し、無い作品は
 // 従来通り色ブロック+頭文字にフォールバックする。画像はloading="lazy"で、
 // 画面外のカードは実際にスクロールされるまで読み込まない。
@@ -3222,8 +3245,11 @@ function buildCardHTML(m, opts){
   const initialOrTitle = overlayTitle
     ? `${hasPoster ? '' : `<span class="poster-thumb-initial">${m.title.charAt(0)}</span>`}<div class="poster-thumb-title">${m.title}</div>`
     : (hasPoster ? '' : m.title.charAt(0));
+  const clickHandler = (opts && opts.returnTo != null)
+    ? `goDetailWithReturn(${m.id}, ${opts.returnTo})`
+    : `goDetail(${m.id})`;
   return `
-    <div class="result-card" onclick="goDetail(${m.id})">
+    <div class="result-card" onclick="${clickHandler}">
       <div class="poster-thumb" style="background:${m.posterColor}">${posterImg}${initialOrTitle}</div>
       ${overlayTitle ? '' : `<div class="result-title">${m.title}</div>`}
       <div class="result-year">${m.year}</div>
@@ -3713,8 +3739,27 @@ function goToResultsPage(delta){
 
 // シリーズの棚が長すぎると横スクロールが延々続いて使いにくいので、
 // 一定本数まではそのまま並べ、それを超える分は「もっと見る」から
-// 全部入りの一覧モーダルで見せる。
-const SERIES_ROW_LIMIT = 8;
+// 全部入りの一覧モーダルで見せる(アベンジャーズ・ハリー・ポッターのような
+// 長編シリーズを想定した本数)。
+const SERIES_ROW_LIMIT = 5;
+
+// タイトルの表記ゆれ(「／」区切りか半角スペースか、中黒の有無など)だけが
+// 違う二重投稿は、完全一致の重複チェックをすり抜けて同じ作品が2件登録
+// されうる(実例: 「アベンジャーズ エイジ・オブ・ウルトロン」と
+// 「アベンジャーズ／エイジ・オブ・ウルトロン」)。新規投稿時のチェックは
+// 別途強化したが、既に登録済みの分はシリーズ棚に並べる直前で正規化して
+// まとめ、より支持されている(投票が多い)方だけを残す。
+function dedupeByNormalizedTitleYear(movies){
+  const bestByKey = new Map();
+  movies.forEach(m => {
+    const key = normalizeForSearch(m.title) + '|' + m.year;
+    const existing = bestByKey.get(key);
+    const engagement = (m.loveCount || 0) + (m.intensityCount || 0);
+    const existingEngagement = existing ? (existing.loveCount || 0) + (existing.intensityCount || 0) : -1;
+    if(!existing || engagement > existingEngagement) bestByKey.set(key, m);
+  });
+  return [...bestByKey.values()];
+}
 
 function renderRecommended(currentMovie){
   const root = document.getElementById('d-recommended');
@@ -3724,7 +3769,7 @@ function renderRecommended(currentMovie){
 
   // シリーズの他の作品(公開年順)
   const seriesSiblings = currentMovie.series
-    ? others.filter(m => m.series === currentMovie.series).sort((a, b) => a.year - b.year)
+    ? dedupeByNormalizedTitleYear(others.filter(m => m.series === currentMovie.series)).sort((a, b) => a.year - b.year)
     : [];
   // リメイク・同じ物語の別バージョン
   const remakeSiblings = currentMovie.remakeGroup
@@ -3750,7 +3795,9 @@ function renderRecommended(currentMovie){
   if(seriesSiblings.length > 0){
     seriesWrap.style.display = 'block';
     const visibleSiblings = seriesSiblings.slice(0, SERIES_ROW_LIMIT);
-    renderMovieCards(seriesRoot, visibleSiblings, '');
+    // シリーズ棚から別作品を開いた後、その詳細ページの「戻る」でこの作品に
+    // すぐ戻れるよう、遷移元(currentMovie.id)を持たせる。
+    renderMovieCards(seriesRoot, visibleSiblings, '', { returnTo: currentMovie.id });
     if(seriesSiblings.length > SERIES_ROW_LIMIT){
       // シリーズ名は自由記述のTMDb由来テキストなので、onclick内にJS文字列として
       // 直接埋め込むとエスケープの層がねじれて壊れうる(HTML属性のデコードが
@@ -3759,7 +3806,7 @@ function renderRecommended(currentMovie){
       const fullSeries = [currentMovie, ...seriesSiblings].sort((a, b) => a.year - b.year);
       const fullSeriesIdsJson = escapeHtml(JSON.stringify(fullSeries.map(m => m.id)));
       seriesRoot.innerHTML += `
-        <div class="result-card series-more-card" data-series="${escapeHtml(currentMovie.series)}" data-ids="${fullSeriesIdsJson}" onclick="openSeriesListModal(this.dataset.series, JSON.parse(this.dataset.ids))">
+        <div class="result-card series-more-card" data-series="${escapeHtml(currentMovie.series)}" data-ids="${fullSeriesIdsJson}" data-origin="${currentMovie.id}" onclick="openSeriesListModal(this.dataset.series, JSON.parse(this.dataset.ids), Number(this.dataset.origin))">
           <div class="poster-thumb series-more-thumb">もっと見る<br>(全${fullSeries.length}作品)</div>
         </div>
       `;
@@ -3778,10 +3825,10 @@ function renderRecommended(currentMovie){
   }
 }
 
-function openSeriesListModal(seriesName, movieIds){
+function openSeriesListModal(seriesName, movieIds, originId){
   document.getElementById('series-list-title').textContent = seriesName;
   const movies = movieIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
-  renderMovieCards(document.getElementById('series-list-items'), movies, '', { overlayTitle: true });
+  renderMovieCards(document.getElementById('series-list-items'), movies, '', { overlayTitle: true, returnTo: originId });
   const overlay = document.getElementById('series-list-overlay');
   const drawer = document.getElementById('series-list-drawer');
   overlay.style.display = 'flex';
@@ -4187,7 +4234,38 @@ function toggleMovieInfoPanel(){
   panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
 }
 
+// シリーズ棚・シリーズ一覧モーダルから別作品を開いたときだけ、その詳細ページの
+// 「戻る」ボタンを一覧ページではなく元の作品の詳細ページに向ける。
+// pendingDetailReturnToはgoDetail()を呼ぶ直前だけ立てる一回限りの合図で、
+// goDetail側で読み取ったらすぐ空に戻す(それ以外の経路からの遷移は今まで通り
+// 「一覧に戻る」のまま)。
+let pendingDetailReturnTo = null;
+let detailReturnTo = null;
+
+function goDetailWithReturn(id, returnToId){
+  pendingDetailReturnTo = returnToId;
+  // シリーズ一覧モーダルを開いたままだと、遷移後の詳細ページの上に
+  // ドロワーが被って表示されたままになる(閉じるアニメーションと並行して
+  // 遷移させることで、ドロワーがスライドダウンして退くような見え方になる)。
+  closeSeriesListModal();
+  goDetail(id);
+}
+
+function goDetailBack(){
+  if(detailReturnTo != null){
+    const returnId = detailReturnTo;
+    detailReturnTo = null;
+    goDetail(returnId);
+  } else {
+    goHome();
+  }
+}
+
 async function goDetail(id){
+  detailReturnTo = pendingDetailReturnTo;
+  pendingDetailReturnTo = null;
+  document.getElementById('d-back-btn').textContent = detailReturnTo != null ? '← 元の作品に戻る' : '← 一覧に戻る';
+
   const m = MOVIES.find(x => x.id === id);
   state.currentMovieId = id;
   document.getElementById('d-tags').innerHTML = m.tags.map(t =>
@@ -4651,7 +4729,11 @@ async function submitMovie(){
   if(!year || year < 1800 || year > 2030){ showToast('公開年は1800〜2030の範囲で入力してください'); return; }
   if(selectedFormTags.size !== 3){ showToast('感情タグを3つ選んでください'); return; }
 
-  const duplicate = MOVIES.some(m => m.title === escapeHtml(title) && m.year === year);
+  // 「／」と半角スペース、中黒の有無など表記ゆれだけが違う二重投稿(例: 「アベンジャーズ
+  // エイジ・オブ・ウルトロン」と「アベンジャーズ／エイジ・オブ・ウルトロン」)は
+  // 完全一致では素通りしてしまっていたため、検索と同じ正規化をかけてから比較する。
+  const normalizedNewTitle = normalizeForSearch(escapeHtml(title));
+  const duplicate = MOVIES.some(m => normalizeForSearch(m.title) === normalizedNewTitle && m.year === year);
   if(duplicate){ showToast('同じタイトル・公開年の映画が既に登録されています'); return; }
 
   if(!addMovieTurnstileToken){
@@ -4832,6 +4914,7 @@ async function loadMyReviews(){
     if(!userId){
       state.myLove = {}; state.myIntensity = {}; state.myReason = {};
       state.hasReviewed = {}; state.myReviewsById = {}; state.myReviewRows = [];
+      state.myReviewRowsLoaded = true;
       return;
     }
     const { data, error } = await supabase
@@ -4854,6 +4937,7 @@ async function loadMyReviews(){
         state.myReviewRows.push({ movieId: row.movie_id, body: row.review_text, createdAt: row.created_at });
       }
     });
+    state.myReviewRowsLoaded = true;
   }catch(err){
     // 取得自体(DB通信)に失敗した場合も、未ログイン扱いにして消すのではなく、
     // 今表示できている内容をそのまま残す(次の読み込みで直る一時的な失敗のため)。
@@ -5089,11 +5173,12 @@ async function loadMySubmittedMovies(){
     const userId = await currentUserId();
     // undefinedは「確認できなかっただけ」なので、視聴記録を消さずに保持する。
     if(userId === undefined) return;
-    if(!userId){ state.mySubmittedMovieIds = []; state.mySubmittedMovies = []; return; }
+    if(!userId){ state.mySubmittedMovieIds = []; state.mySubmittedMovies = []; state.mySubmittedMoviesLoaded = true; return; }
     const { data, error } = await supabase.from('movies').select('id, created_at').eq('added_by', userId);
     if(error) throw error;
     state.mySubmittedMovieIds = (data || []).map(row => row.id);
     state.mySubmittedMovies = data || [];
+    state.mySubmittedMoviesLoaded = true;
   }catch(err){
     console.error(err);
   }
@@ -5390,6 +5475,19 @@ function goProfile(){
     renderViewingRecord();
     renderExcludedWords();
 
+    // 起動時のinit()でcurrentUserId()がタイムアウトし、myLogs/mySubmittedMovies/
+    // myReviewRowsのどれかが一度も読み込めなかった場合、それ以降は何もしないと
+    // ずっと空のまま(「他のページを触った後に戻ってきても前の表示のまま」)に
+    // なってしまう。プロフィールに来るたびに、まだ読み込めていない分だけ
+    // 裏で読み直し、直ったら視聴記録を描き直す。
+    if(!state.myLogsLoaded || !state.mySubmittedMoviesLoaded || !state.myReviewRowsLoaded){
+      Promise.all([
+        state.myLogsLoaded ? null : loadMyLogs(),
+        state.mySubmittedMoviesLoaded ? null : loadMySubmittedMovies(),
+        state.myReviewRowsLoaded ? null : loadMyReviews()
+      ]).then(() => renderViewingRecord());
+    }
+
     // メールアドレスの表示だけはgetUser()(gotrue-jsが希にハングする既知の不具合が
     // ある通信を伴う呼び出し)に依存している。以前はこれをawaitしてから上の
     // renderViewingRecord()等を呼んでいたため、ハングすると視聴記録などが
@@ -5452,7 +5550,7 @@ async function loadMyLogs(){
     const userId = await currentUserId();
     // undefinedは「確認できなかっただけ」なので、視聴記録を消さずに保持する。
     if(userId === undefined) return;
-    if(!userId){ state.myLogs = []; return; }
+    if(!userId){ state.myLogs = []; state.myLogsLoaded = true; return; }
     const { data, error } = await supabase
       .from('movie_logs')
       .select('*')
@@ -5460,6 +5558,7 @@ async function loadMyLogs(){
       .order('created_at', { ascending: false });
     if(error) throw error;
     state.myLogs = data || [];
+    state.myLogsLoaded = true;
   }catch(err){
     console.error(err);
   }
@@ -5517,28 +5616,72 @@ function buildViewingRecordEntries(){
   return entries;
 }
 
+function renderHistoryItemHTML(e){
+  const dateLabel = e.date ? new Date(e.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '';
+  return `
+    <div class="history-item" onclick="${e.onClick}">
+      <div class="h-poster" style="background:${e.poster}">${escapeHtml(e.initial)}</div>
+      <div style="min-width:0;">
+        <div class="h-title">${escapeHtml(e.title)}</div>
+        <div class="h-sub">${dateLabel ? dateLabel + ' ・ ' : ''}${escapeHtml(e.sub || '')}</div>
+      </div>
+    </div>
+  `;
+}
+
+function renderRecordTileHTML(e){
+  return `
+    <div class="result-card" onclick="${e.onClick}">
+      <div class="poster-thumb" style="background:${e.poster}">
+        <span class="poster-thumb-initial">${escapeHtml(e.initial)}</span>
+        <div class="poster-thumb-title">${escapeHtml(e.title)}</div>
+      </div>
+    </div>
+  `;
+}
+
+// プロフィール上では直近だけを短く縦積みで見せ、増えた分は「もっと見る」から
+// スクラップブック風のポスター格子(全件・最新順)で一覧できるようにする。
+const VIEWING_RECORD_PREVIEW_COUNT = 5;
+
 function renderViewingRecord(){
   const root = document.getElementById('viewing-record-list');
+  const moreBtn = document.getElementById('viewing-record-more-btn');
   if(!root) return;
 
   const entries = buildViewingRecordEntries();
   if(!entries.length){
     root.innerHTML = '<div class="empty" style="padding:16px 0;">まだ記録がありません。映画を追加したり、レビューや視聴ログを書くとここに積み重なっていきます。</div>';
+    moreBtn.style.display = 'none';
     return;
   }
 
-  root.innerHTML = entries.map(e => {
-    const dateLabel = e.date ? new Date(e.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '';
-    return `
-      <div class="history-item" onclick="${e.onClick}">
-        <div class="h-poster" style="background:${e.poster}">${escapeHtml(e.initial)}</div>
-        <div style="min-width:0;">
-          <div class="h-title">${escapeHtml(e.title)}</div>
-          <div class="h-sub">${dateLabel ? dateLabel + ' ・ ' : ''}${escapeHtml(e.sub || '')}</div>
-        </div>
-      </div>
-    `;
-  }).join('');
+  const visible = entries.slice(0, VIEWING_RECORD_PREVIEW_COUNT);
+  root.innerHTML = visible.map(renderHistoryItemHTML).join('');
+
+  const remaining = entries.length - visible.length;
+  if(remaining > 0){
+    moreBtn.style.display = 'block';
+    moreBtn.textContent = `もっと見る(残り${remaining}個)`;
+  } else {
+    moreBtn.style.display = 'none';
+  }
+}
+
+function openViewingRecordModal(){
+  const entries = buildViewingRecordEntries();
+  document.getElementById('viewing-record-grid').innerHTML = entries.map(renderRecordTileHTML).join('');
+  const overlay = document.getElementById('viewing-record-overlay');
+  const drawer = document.getElementById('viewing-record-drawer');
+  overlay.style.display = 'flex';
+  drawer.classList.remove('closing');
+}
+
+function closeViewingRecordModal(){
+  const overlay = document.getElementById('viewing-record-overlay');
+  const drawer = document.getElementById('viewing-record-drawer');
+  drawer.classList.add('closing');
+  setTimeout(() => { overlay.style.display = 'none'; }, 280);
 }
 
 function goMyLogForm(logId){
