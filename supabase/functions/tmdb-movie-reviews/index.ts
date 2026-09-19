@@ -27,6 +27,28 @@ async function tmdbFetch(path: string, params: Record<string, string> = {}) {
   return await res.json();
 }
 
+// MyMemory(https://mymemory.translated.net)の無料翻訳API。APIキー不要で
+// 1日あたり5000語まで無料(超過すると翻訳せず原文を返してくるだけなので、
+// 失敗時のフォールバックと自然に両立する)。当初は非公式のGoogle翻訳
+// エンドポイントを使っていたが、Supabase Edge Functionsの送信元IPからだと
+// 429(レート制限)で弾かれ続けたため、こちらの正式な無料APIに切り替えた。
+// 1リクエストあたり500文字程度が上限のため、それより長いレビューは訳す前に切り詰める。
+async function translateToJa(text: string): Promise<string> {
+  const trimmed = text.slice(0, 480);
+  try {
+    const url = new URL("https://api.mymemory.translated.net/get");
+    url.searchParams.set("q", trimmed);
+    url.searchParams.set("langpair", "en|ja");
+    const res = await fetch(url.toString());
+    if (!res.ok) return trimmed;
+    const data = await res.json();
+    const translated = String(data?.responseData?.translatedText || "").trim();
+    return translated || trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
 // tmdb-movie-metadataと同じ考え方の検索(年が分かればまず年で絞り込み、
 // ダメなら候補の中から公開年が近いものを選ぶ)。include_adult:falseは固定。
 async function searchTmdbId(title: string, year: number | null): Promise<number | null> {
@@ -86,13 +108,21 @@ Deno.serve(async (req: Request) => {
   }
 
   const reviewsData = await tmdbFetch(`/movie/${tmdbId}/reviews`, { language: "en-US", page: "1" });
-  const reviews = (reviewsData?.results || []).map((r: any) => ({
-    author: r.author_details?.username || r.author || "anonymous",
-    rating: r.author_details?.rating ?? null,
-    content: String(r.content || "").trim(),
-    url: r.url || null,
-    created_at: r.created_at || null,
-  })).filter((r: any) => r.content.length > 0);
+  const rawReviews = (reviewsData?.results || [])
+    .map((r: any) => ({
+      author: r.author_details?.username || r.author || "anonymous",
+      rating: r.author_details?.rating ?? null,
+      content: String(r.content || "").trim(),
+      url: r.url || null,
+      created_at: r.created_at || null,
+    }))
+    .filter((r: any) => r.content.length > 0)
+    // 翻訳リクエストが増えすぎないよう、マーキーに出す分だけ(最大6件)に絞る
+    .slice(0, 6);
+
+  const reviews = await Promise.all(
+    rawReviews.map(async (r: any) => ({ ...r, content: await translateToJa(r.content) })),
+  );
 
   return json({ movie_id: movieId, tmdb_matched: true, tmdb_id: tmdbId, reviews });
 });
