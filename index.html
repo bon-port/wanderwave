@@ -352,21 +352,16 @@
   }
 
   /* TMDBの海外レビュー(日本語訳)。Wander本体のレビュー(上のd-reviews)とは
-     出どころが違う付加情報なので、彩度を抑えて主役の邪魔をしないトーンにし、
-     ホームの「みんなの声」と同じ、自動で下(横)に流れるマーキー形式で見せる。 */
+     出どころが違う付加情報なので、彩度を抑えて主役の邪魔をしないトーンにする。
+     自動で流れるマーキーだと自分のペースで読めないので、静かに縦に並べ、
+     「もっと見る」で自分のタイミングで開いてもらう形にする。 */
   #tmdb-reviews-section{ margin-top: 22px; }
   .tmdb-reviews-label{
     font-size: 11px; color: var(--ink-soft); font-weight:600;
     letter-spacing:.03em; margin-bottom:8px; opacity:.75;
   }
-  .tmdb-review-marquee{
-    overflow-x: auto; overflow-y: hidden; -webkit-overflow-scrolling: touch;
-  }
-  .tmdb-review-marquee::-webkit-scrollbar{ height: 4px; }
-  .tmdb-review-marquee::-webkit-scrollbar-thumb{ background: var(--line); border-radius: 3px; }
-  .tmdb-review-track{ display:flex; gap:12px; width:max-content; }
+  .tmdb-review-list{ display:flex; flex-direction:column; gap:10px; }
   .tmdb-review-card{
-    flex: 0 0 220px; scroll-snap-align: start;
     border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
     background: rgba(255,255,255,0.02);
   }
@@ -2105,9 +2100,8 @@
     <!-- Wander本体のレビューとは別物とわかるよう、控えめなトーンで分けて表示する -->
     <div id="tmdb-reviews-section" style="display:none;">
       <div class="tmdb-reviews-label" id="tmdb-reviews-label">TMDBの声(海外レビュー・日本語訳)</div>
-      <div class="tmdb-review-marquee" id="tmdb-review-marquee">
-        <div class="tmdb-review-track" id="tmdb-review-track"></div>
-      </div>
+      <div class="tmdb-review-list" id="tmdb-review-list"></div>
+      <button class="link-btn" id="tmdb-review-more-btn" style="display:none;" onclick="toggleTmdbReviewsExpand()"></button>
     </div>
 
     <div class="post-panel">
@@ -3664,8 +3658,8 @@ function renderHomeRows(){
 
   if(reviewCards.length){
     // 自動で流れ続けつつ、指でもドラッグしてスクロールできるようにする
-    // (initAutoScrollMarquee()参照、TMDBレビュー欄とも共通の仕組み)。
-    // シームレスにループさせるため、カード列を2回連続で並べ、ちょうど半分ぶん
+    // (initAutoScrollMarquee()参照)。シームレスにループさせるため、
+    // カード列を2回連続で並べ、ちょうど半分ぶん
     // (=1周ぶん)進んだらscrollLeftを巻き戻す。
     // 速度は固定秒数ではなく枚数に比例させる(1枚あたり約7秒で通り過ぎる、
     // ゆっくり読める速さ)。固定秒数だと枚数が多い日ほど逆に速く流れてしまい、
@@ -4697,11 +4691,15 @@ async function goDetail(id){
   await Promise.all([loadMovieReviews(m), loadMovieTagVotes(m)]);
 }
 
-// TMDBの海外レビューを取得する(tmdb-movie-reviews関数経由。日本語訳も関数側で
-// 済ませてから返ってくる。TMDb映画IDをまだ知らない作品は関数側が検索して
+// TMDBの海外レビューを取得する(tmdb-movie-reviews関数経由。日本語訳と、
+// 作品と関係のない政治的な主張などを含むレビューの除外も関数側で済ませて
+// から返ってくる。TMDb映画IDをまだ知らない作品は関数側が検索して
 // movies.tmdb_idに書き戻すので、2回目以降のこの作品の表示では検索なしですぐ返る)。
-// 「みんなの声」と同じ、自動で流れるマーキー形式で並べて見せる。
+// 自動で流れるマーキーだと自分のペースで読めないため、静かに縦へ並べ、
+// 最初の1件だけ見せて残りは「もっと見る」で自分のタイミングで開けるようにする。
 let tmdbReviews = [];
+const TMDB_REVIEW_PREVIEW_COUNT = 1;
+let tmdbReviewsExpanded = false;
 
 async function loadTmdbReviews(movieId){
   const section = document.getElementById('tmdb-reviews-section');
@@ -4717,17 +4715,19 @@ async function loadTmdbReviews(movieId){
     if(error || !data || !data.reviews || !data.reviews.length) return;
 
     tmdbReviews = data.reviews;
-    renderTmdbReviewMarquee();
+    tmdbReviewsExpanded = false;
+    document.getElementById('tmdb-reviews-label').textContent = `TMDBの声(海外レビュー・日本語訳)(${tmdbReviews.length}件)`;
+    renderTmdbReviewList();
     section.style.display = 'block';
   }catch(err){
     console.error('TMDBレビューの取得に失敗しました', err);
   }
 }
 
-function renderTmdbReviewMarquee(){
-  document.getElementById('tmdb-reviews-label').textContent = `TMDBの声(海外レビュー・日本語訳)(${tmdbReviews.length}件)`;
-  const track = document.getElementById('tmdb-review-track');
-  const cardsHtml = tmdbReviews.map(r => `
+function renderTmdbReviewList(){
+  const listEl = document.getElementById('tmdb-review-list');
+  const visible = tmdbReviewsExpanded ? tmdbReviews : tmdbReviews.slice(0, TMDB_REVIEW_PREVIEW_COUNT);
+  listEl.innerHTML = visible.map(r => `
     <div class="tmdb-review-card">
       <div class="tmdb-review-head">
         <span class="tmdb-review-author">${escapeHtml(r.author)}</span>
@@ -4736,11 +4736,23 @@ function renderTmdbReviewMarquee(){
       <div class="tmdb-review-body">${escapeHtml(r.content)}</div>
     </div>
   `).join('');
-  const marqueeSeconds = Math.max(40, tmdbReviews.length * 9);
-  track.dataset.loopSeconds = String(marqueeSeconds);
-  // ホームの「みんなの声」と同じく、2周ぶん並べてシームレスにループさせる
-  track.innerHTML = cardsHtml + cardsHtml;
-  initAutoScrollMarquee('tmdb-review-marquee', 'tmdb-review-track');
+
+  const moreBtn = document.getElementById('tmdb-review-more-btn');
+  const remaining = tmdbReviews.length - visible.length;
+  if(remaining > 0){
+    moreBtn.style.display = 'inline-block';
+    moreBtn.textContent = `もっと見る(あと${remaining}件)`;
+  } else if(tmdbReviewsExpanded && tmdbReviews.length > TMDB_REVIEW_PREVIEW_COUNT){
+    moreBtn.style.display = 'inline-block';
+    moreBtn.textContent = '閉じる';
+  } else {
+    moreBtn.style.display = 'none';
+  }
+}
+
+function toggleTmdbReviewsExpand(){
+  tmdbReviewsExpanded = !tmdbReviewsExpanded;
+  renderTmdbReviewList();
 }
 
 // この映画に投票された感情タグ(3つの初期タグ以外にみんなが追加投票したもの)を

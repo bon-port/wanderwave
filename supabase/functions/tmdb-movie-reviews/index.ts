@@ -49,6 +49,25 @@ async function translateToJa(text: string): Promise<string> {
   }
 }
 
+// TMDBは外部の匿名レビューなので、作品とは関係のない政治的な主張や扇動的な
+// 話題が混ざることがある(実例: 作品評とは無関係に特定の政治的立場について
+// 書かれたレビュー)。完全な検閲ではなく「一定の歯止め」として、政治色の
+// 強い語を含むレビューは表示前に除外する。作品のテーマとして正当に触れて
+// いるだけのレビューまで誤って弾いてしまうことはありうるが、静かなトーンの
+// プロダクトなので疑わしきは出さない側に倒す。
+const POLITICAL_FLAG_WORDS = [
+  "left-wing", "right-wing", "leftist", "rightist", "far-left", "far-right",
+  "woke agenda", "sjw", "maga", "antifa", "culture war",
+  "democrat party", "republican party", "trump", "biden",
+  "communism", "communist", "marxist", "marxism", "fascist propaganda",
+  "abortion", "gun control", "critical race theory", "immigration policy",
+];
+
+function containsPoliticalContent(text: string): boolean {
+  const lower = text.toLowerCase();
+  return POLITICAL_FLAG_WORDS.some((w) => lower.includes(w));
+}
+
 // tmdb-movie-metadataと同じ考え方の検索(年が分かればまず年で絞り込み、
 // ダメなら候補の中から公開年が近いものを選ぶ)。include_adult:falseは固定。
 async function searchTmdbId(title: string, year: number | null): Promise<number | null> {
@@ -117,7 +136,8 @@ Deno.serve(async (req: Request) => {
       created_at: r.created_at || null,
     }))
     .filter((r: any) => r.content.length > 0)
-    // 翻訳リクエストが増えすぎないよう、マーキーに出す分だけ(最大6件)に絞る
+    .filter((r: any) => !containsPoliticalContent(r.content))
+    // 翻訳リクエストが増えすぎないよう、表示する分だけ(最大6件)に絞る
     .slice(0, 6);
 
   const reviews = await Promise.all(
