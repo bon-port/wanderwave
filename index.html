@@ -1825,11 +1825,39 @@
     display:flex; align-items:center; gap: 6px;
   }
   .diagnosis-share-btn:active{ transform: scale(0.97); }
-  .pocket-diagnosis-rec{ margin-top: 16px; }
-  .pocket-rec-label{
-    font-size: 11.5px; color: var(--ink-soft); font-weight:600; margin-bottom: 8px;
+  /* 今日の映画みくじ。一覧で選ばせる「おすすめ」カード列ではなく、
+     静かに1本だけ差し出す紙のおみくじのような見た目にする(左端に細い
+     アクセント線、派手なアニメーションやバッジは付けない)。 */
+  .omikuji-card{
+    margin-top: 16px;
+    border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px 16px 14px 18px; cursor: pointer;
+    background: var(--surface);
+    position: relative; overflow: hidden;
   }
-  .pocket-diagnosis-rec .results{ padding: 0; margin: 0; }
+  .omikuji-card:active{ transform: scale(0.99); }
+  .omikuji-card::before{
+    content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
+    background: linear-gradient(180deg, var(--gold), var(--love));
+  }
+  .omikuji-label{
+    font-size: 11px; color: var(--gold); font-weight:600; letter-spacing:.04em;
+    margin-bottom: 10px;
+  }
+  .omikuji-body{ display:flex; gap:12px; align-items:center; }
+  .omikuji-poster{
+    width: 48px; height: 68px; border-radius:6px; flex-shrink:0;
+    position:relative; overflow:hidden;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'M PLUS Rounded 1c', sans-serif; font-weight:700; color:rgba(255,255,255,.85);
+  }
+  .omikuji-poster img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
+  .omikuji-text{ min-width: 0; }
+  .omikuji-title{
+    font-family:'M PLUS Rounded 1c', sans-serif; font-weight:700; font-size:15px; color:var(--ink);
+    margin-bottom:4px; line-height:1.35;
+  }
+  .omikuji-line{ font-size:12px; color:var(--ink-soft); line-height:1.5; }
 
   /* ---- reconsider modal ---- */
   .modal-overlay{
@@ -2372,7 +2400,20 @@
       </div>
       <div class="pocket-diagnosis-text" id="new-diagnosis-text"></div>
       <div id="new-diagnosis-movies" class="diagnosis-result-movies"></div>
-      <div id="new-diagnosis-rec" class="pocket-diagnosis-rec" style="display:none;"></div>
+
+      <!-- 一覧で選ばせる「おすすめ」ではなく、今日はこの1本だけをそっと
+           差し出すおみくじ形式。日付+選んだ5本をシードにしているので、
+           同じ日はページを開き直しても結果は変わらない。 -->
+      <div id="omikuji-card" class="omikuji-card" style="display:none;">
+        <div class="omikuji-label">今日の映画みくじ</div>
+        <div class="omikuji-body">
+          <div class="omikuji-poster" id="omikuji-poster"></div>
+          <div class="omikuji-text">
+            <div class="omikuji-title" id="omikuji-title"></div>
+            <div class="omikuji-line">今日はこの1本を、そっと差し出してみます。</div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <button class="link-btn diagnosis-history-link" onclick="openDiagnosisHistoryModal()">過去の記憶を見る</button>
@@ -6415,18 +6456,45 @@ function generateDiagnosis(pocketMovies){
 
   const body = [cardSection, senseSection, oracleSection].join('\n\n');
 
-  // 今のあなたへのおすすめ(選んでいない、傾向が近い作品)
+  // 今日の映画みくじ(選んでいない、傾向が近い作品から1本だけ)
   const pickedIds = pocketMovies.map(m => m.id);
-  const candidates = MOVIES.filter(m => !pickedIds.includes(m.id) && (m.tags.includes(topTag) || (secondTag && m.tags.includes(secondTag))));
-  const recommendedIds = candidates.sort((a, b) => loveAverage(b) - loveAverage(a)).slice(0, 6).map(m => m.id);
+  const omikujiMovieId = pickOmikujiMovie(topTag, secondTag, pickedIds);
 
   return {
     name: diagnosisName,
     themeTitle: themeTitle,
     body: body,
-    recommendedIds: recommendedIds,
+    omikujiMovieId: omikujiMovieId,
     topTag: topTag
   };
+}
+
+// 一覧で選ばせる「おすすめ」ではなく、傾向が近い未選択の作品から1本だけを
+// おみくじのように差し出す。日付+選んだ作品IDをシードにしているので、
+// 同じ日にページを開き直しても結果は変わらない(日が変われば新しい1本になる)。
+function pickOmikujiMovie(topTag, secondTag, excludeIds){
+  const candidates = MOVIES.filter(m =>
+    !excludeIds.includes(m.id) && (m.tags.includes(topTag) || (secondTag && m.tags.includes(secondTag)))
+  );
+  if(!candidates.length) return null;
+  const seedKey = `movie-omikuji:${excludeIds.slice().sort((a, b) => a - b).join(',')}`;
+  const rand = mulberry32(todaySeed(seedKey));
+  return candidates[Math.floor(rand() * candidates.length)].id;
+}
+
+function renderOmikujiCard(movieId){
+  const card = document.getElementById('omikuji-card');
+  const m = movieId != null ? MOVIES.find(x => x.id === movieId) : null;
+  if(!m){ card.style.display = 'none'; return; }
+
+  const posterEl = document.getElementById('omikuji-poster');
+  posterEl.style.background = m.posterColor;
+  posterEl.innerHTML = m.posterUrl
+    ? `<img src="${m.posterUrl}" alt="" loading="lazy" decoding="async">`
+    : escapeHtml(m.title.charAt(0));
+  document.getElementById('omikuji-title').textContent = m.title;
+  card.onclick = () => goDetailWithViewReturn(m.id, 'view-pocket', '← 診断に戻る');
+  card.style.display = 'block';
 }
 
 function pocketSnapshotIds(pocketMovies){
@@ -7196,8 +7264,7 @@ function applyDiagnosisShareCard(cardId, topTag, themeTitle, movieTitles){
 
 // クールダウン中(次に診断できるまでの30日間)は新しい結果を作れない代わりに、
 // 直近の診断結果をこの関数で出し続ける(runNewDiagnosis()の表示ロジックと
-// 共通化)。おすすめ欄(new-diagnosis-rec)はその場で計算するものなので、
-// 過去の記録の再表示では省く。
+// 共通化)。secondTagは履歴に保存していないので、みくじの候補はtopTagだけで絞る。
 function applyDiagnosisResultDisplay(historyEntry){
   const movies = (historyEntry.movieIds || []).map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
   // history.nameは『』で囲って保存してあるので、カード表示用に中身だけ取り出す
@@ -7213,9 +7280,8 @@ function applyDiagnosisResultDisplay(historyEntry){
     </div>
   `).join('');
 
-  const recEl = document.getElementById('new-diagnosis-rec');
-  recEl.style.display = 'none';
-  recEl.innerHTML = '';
+  const omikujiMovieId = pickOmikujiMovie(historyEntry.topTag, null, historyEntry.movieIds || []);
+  renderOmikujiCard(omikujiMovieId);
 
   const resultEl = document.getElementById('diagnosis-result');
   resultEl.style.display = 'block';
@@ -7265,17 +7331,7 @@ async function runNewDiagnosis(){
     </div>
   `).join('');
 
-  const recEl = document.getElementById('new-diagnosis-rec');
-  const recommendedIds = diagnosis.recommendedIds || [];
-  if(recommendedIds.length > 0){
-    const recMovies = recommendedIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
-    recEl.style.display = 'block';
-    const recOpts = { returnToView: { id: 'view-pocket', label: '← 診断に戻る' } };
-    recEl.innerHTML = `<div class="pocket-rec-label">今のあなたへのおすすめ</div><div class="results">${recMovies.map(m => buildCardHTML(m, recOpts)).join('')}</div>`;
-  } else {
-    recEl.style.display = 'none';
-    recEl.innerHTML = '';
-  }
+  renderOmikujiCard(diagnosis.omikujiMovieId);
 
   const resultEl = document.getElementById('diagnosis-result');
   resultEl.style.display = 'none';
