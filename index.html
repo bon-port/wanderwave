@@ -350,6 +350,45 @@
   .results-pagination-status{
     font-size: 13px; color: var(--ink-soft); flex: 1; text-align:center;
   }
+
+  /* TMDBの海外レビュー。Wander本体のレビュー(上のd-reviews)とは出どころが
+     違う付加情報なので、彩度を抑えて主役の邪魔をしないトーンにする。 */
+  #tmdb-reviews-section{ margin-top: 22px; }
+  .tmdb-reviews-label{
+    font-size: 11px; color: var(--ink-soft); font-weight:600;
+    letter-spacing:.03em; margin-bottom:8px; opacity:.75;
+  }
+  .tmdb-review-card{
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px;
+    background: rgba(255,255,255,0.02);
+  }
+  .tmdb-review-head{
+    display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; gap:8px;
+  }
+  .tmdb-review-author{
+    font-size:11.5px; color:var(--ink-soft); font-weight:600;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
+  .tmdb-review-rating{ font-size:11px; color:var(--ink-soft); opacity:.7; flex-shrink:0; }
+  .tmdb-review-body{
+    font-size:12px; line-height:1.6; color: var(--ink-soft);
+    display:-webkit-box; -webkit-line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;
+    white-space: pre-line;
+  }
+  .tmdb-review-body.expanded{ -webkit-line-clamp: unset; overflow: visible; }
+  .tmdb-review-more{
+    background:none; border:none; color:var(--ink-soft); font-size:11px;
+    text-decoration:underline; cursor:pointer; padding:6px 0 0; opacity:.8; display:none;
+  }
+  .tmdb-review-switcher{ display:none; gap:10px; margin-top:10px; justify-content:center; }
+  .tmdb-review-dot{
+    width:18px; height:18px; cursor:pointer;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .tmdb-review-dot::before{
+    content:''; width:6px; height:6px; border-radius:50%; background:var(--line);
+  }
+  .tmdb-review-dot.active::before{ background: var(--ink-soft); }
   .results{
     margin-top: 22px;
     display:flex; gap: 16px;
@@ -2024,6 +2063,20 @@
       <button class="ghost-btn results-pagination-btn" id="reviews-page-prev" onclick="goToReviewsPage(-1)">‹ 前へ</button>
       <span class="results-pagination-status" id="reviews-pagination-status"></span>
       <button class="ghost-btn results-pagination-btn" id="reviews-page-next" onclick="goToReviewsPage(1)">次へ ›</button>
+    </div>
+
+    <!-- Wander本体のレビューとは別物とわかるよう、控えめなトーンで分けて表示する -->
+    <div id="tmdb-reviews-section" style="display:none;">
+      <div class="tmdb-reviews-label">TMDBの声(海外レビュー)</div>
+      <div class="tmdb-review-card">
+        <div class="tmdb-review-head">
+          <span class="tmdb-review-author" id="tmdb-review-author"></span>
+          <span class="tmdb-review-rating" id="tmdb-review-rating"></span>
+        </div>
+        <div class="tmdb-review-body" id="tmdb-review-body"></div>
+        <button class="tmdb-review-more" id="tmdb-review-more-btn" onclick="toggleTmdbReviewExpand()">もっと見る</button>
+      </div>
+      <div class="tmdb-review-switcher" id="tmdb-review-switcher"></div>
     </div>
 
     <div class="post-panel">
@@ -4572,7 +4625,81 @@ async function goDetail(id){
   renderRecommended(m);
   switchView('view-detail');
 
+  // TMDBレビューは主役のWander本体レビューを待たせてまで表示する必要が無い
+  // (賑わい・補足目的の薄い付加情報)ので、await せず裏で読み込む。
+  loadTmdbReviews(id);
+
   await Promise.all([loadMovieReviews(m), loadMovieTagVotes(m)]);
+}
+
+// TMDBの海外レビューを取得する(tmdb-movie-reviews関数経由。TMDb映画IDを
+// まだ知らない作品は関数側が検索してmovies.tmdb_idに書き戻すので、
+// 2回目以降のこの作品の表示では検索なしですぐ返る)。
+let tmdbReviews = [];
+let tmdbReviewIndex = 0;
+
+async function loadTmdbReviews(movieId){
+  const section = document.getElementById('tmdb-reviews-section');
+  section.style.display = 'none';
+  tmdbReviews = [];
+  tmdbReviewIndex = 0;
+  try{
+    const { data, error } = await supabase.functions.invoke('tmdb-movie-reviews', {
+      body: { movie_id: movieId }
+    });
+    // 取得が遅れている間に別の作品に切り替わっていたら、無関係なレビューを
+    // 出してしまわないよう捨てる。
+    if(state.currentMovieId !== movieId) return;
+    if(error || !data || !data.reviews || !data.reviews.length) return;
+
+    tmdbReviews = data.reviews;
+    tmdbReviewIndex = 0;
+    renderTmdbReview();
+    section.style.display = 'block';
+  }catch(err){
+    console.error('TMDBレビューの取得に失敗しました', err);
+  }
+}
+
+function renderTmdbReview(){
+  const r = tmdbReviews[tmdbReviewIndex];
+  if(!r) return;
+
+  document.getElementById('tmdb-review-author').textContent = r.author;
+  document.getElementById('tmdb-review-rating').textContent = r.rating ? `★ ${r.rating}/10` : '';
+
+  const bodyEl = document.getElementById('tmdb-review-body');
+  bodyEl.textContent = r.content;
+  bodyEl.classList.remove('expanded');
+
+  const moreBtn = document.getElementById('tmdb-review-more-btn');
+  moreBtn.textContent = 'もっと見る';
+  // 4行に収まる短いレビューでは「もっと見る」自体を出さない
+  requestAnimationFrame(() => {
+    moreBtn.style.display = bodyEl.scrollHeight > bodyEl.clientHeight + 1 ? 'inline-block' : 'none';
+  });
+
+  const switcherEl = document.getElementById('tmdb-review-switcher');
+  if(tmdbReviews.length > 1){
+    switcherEl.style.display = 'flex';
+    switcherEl.innerHTML = tmdbReviews.map((_, i) =>
+      `<div class="tmdb-review-dot${i === tmdbReviewIndex ? ' active' : ''}" onclick="switchTmdbReview(${i})"></div>`
+    ).join('');
+  } else {
+    switcherEl.style.display = 'none';
+  }
+}
+
+function switchTmdbReview(i){
+  tmdbReviewIndex = i;
+  renderTmdbReview();
+}
+
+function toggleTmdbReviewExpand(){
+  const bodyEl = document.getElementById('tmdb-review-body');
+  const btn = document.getElementById('tmdb-review-more-btn');
+  const expanded = bodyEl.classList.toggle('expanded');
+  btn.textContent = expanded ? '閉じる' : 'もっと見る';
 }
 
 // この映画に投票された感情タグ(3つの初期タグ以外にみんなが追加投票したもの)を
