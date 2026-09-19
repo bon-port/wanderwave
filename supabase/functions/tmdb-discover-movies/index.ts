@@ -101,6 +101,22 @@ function pickEmotionTags(genreIds: number[]): string[] {
   return order.sort((a, b) => freq[b] - freq[a]).slice(0, 3);
 }
 
+async function translateToJa(text: string): Promise<string> {
+  const trimmed = text.slice(0, 480);
+  try {
+    const url = new URL("https://api.mymemory.translated.net/get");
+    url.searchParams.set("q", trimmed);
+    url.searchParams.set("langpair", "en|ja");
+    const res = await fetch(url.toString());
+    if (!res.ok) return trimmed;
+    const data = await res.json();
+    const translated = String(data?.responseData?.translatedText || "").trim();
+    return translated || trimmed;
+  } catch {
+    return trimmed;
+  }
+}
+
 function normalizeTitle(t: string): string {
   return (t || "").trim().toLowerCase();
 }
@@ -144,6 +160,13 @@ Deno.serve(async (req: Request) => {
       min_vote_count = 300,
       min_vote_average = 6.0,
       dry_run = true,
+      // vote_count.desc(既定)だと、これまでの取り込みで既に上位が
+      // ほぼ網羅済み(深いページまで検証しても新規候補がほぼ出ない)。
+      // 別の軸で探せるよう、sort_by・公開日の下限・原語を上書きできるようにする。
+      sort_by = "vote_count.desc",
+      primary_release_date_gte = null,
+      primary_release_date_lte = null,
+      with_original_language = null,
     } = await req.json().catch(() => ({}));
 
     const supabase = createClient(SUPABASE_URL, SERVICE_ROLE);
@@ -157,14 +180,18 @@ Deno.serve(async (req: Request) => {
     // 1) TMDbのdiscoverでページ分の候補一覧を取得
     const candidates: any[] = [];
     for (const page of pages) {
-      const data = await tmdbFetch("/discover/movie", {
+      const params: Record<string, string> = {
         language: "ja-JP",
-        sort_by: "vote_count.desc",
+        sort_by,
         "vote_count.gte": String(min_vote_count),
         "vote_average.gte": String(min_vote_average),
         include_adult: "false",
         page: String(page),
-      });
+      };
+      if (primary_release_date_gte) params["primary_release_date.gte"] = primary_release_date_gte;
+      if (primary_release_date_lte) params["primary_release_date.lte"] = primary_release_date_lte;
+      if (with_original_language) params["with_original_language"] = with_original_language;
+      const data = await tmdbFetch("/discover/movie", params);
       if (data?.results?.length) candidates.push(...data.results);
       await sleep(150);
     }
@@ -203,7 +230,12 @@ Deno.serve(async (req: Request) => {
           const cast = (credits?.cast || []).slice(0, 5).map((p: any) => p.name);
           const countries = (details.production_countries || []).map((co: any) => countryNameJa(co.iso_3166_1, co.name));
           const year = details.release_date ? parseInt(String(details.release_date).slice(0, 4), 10) : null;
-          const synopsis = (details.overview || "").slice(0, SYNOPSIS_MAX_LEN);
+          let overviewJa = details.overview || "";
+          if (!overviewJa) {
+            const detailsEn = await tmdbFetch(`/movie/${c.id}`, { language: "en-US" });
+            if (detailsEn?.overview) overviewJa = await translateToJa(detailsEn.overview);
+          }
+          const synopsis = overviewJa.slice(0, SYNOPSIS_MAX_LEN);
           const japanReleaseDate = extractJapanReleaseDate(releaseDates?.results || []);
           const keywords = (keywordsRes?.keywords || []).slice(0, 15).map((k: any) => k.name);
           const series = details.belongs_to_collection?.name ? cleanSeriesName(details.belongs_to_collection.name) : null;
