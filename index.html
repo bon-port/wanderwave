@@ -3112,7 +3112,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myReviewRowsLoaded: false, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, myLogs: [], myLogsLoaded: false, mySubmittedMovieIds: [], mySubmittedMovies: [], mySubmittedMoviesLoaded: false, lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [] };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myReviewRowsLoaded: false, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, profileLoaded: false, myLogs: [], myLogsLoaded: false, mySubmittedMovieIds: [], mySubmittedMovies: [], mySubmittedMoviesLoaded: false, lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [] };
 
 
 function riskLabel(v){
@@ -5053,7 +5053,7 @@ async function loadProfile(){
     // プロフィール画面・視聴記録が一時的に丸ごと消えて見える事故になるため、
     // 判定できるまで今の状態をそのまま残す。
     if(user === undefined) return;
-    if(!user){ state.profile = null; return; }
+    if(!user){ state.profile = null; state.profileLoaded = true; return; }
 
     const { data, error } = await supabase
       .from('profiles')
@@ -5078,6 +5078,7 @@ async function loadProfile(){
     if(!onboarded){
       // まだこの端末で登録を完了していない(トリガーが作った仮のプロフィールのみの状態)
       state.profile = null;
+      state.profileLoaded = true;
       return;
     }
     localStorage.setItem(ONBOARDED_KEY, 'true');
@@ -5101,6 +5102,7 @@ async function loadProfile(){
       // メール確認済みユーザー限定にしている機能の判定に使う。
       emailVerified: user.is_anonymous === false && !!user.email_confirmed_at
     };
+    state.profileLoaded = true;
   }catch(err){
     // profiles/user_search_preferencesへの通信自体に失敗した場合も、未登録扱いに
     // して消すのではなく、今表示できている内容をそのまま残す(次の読み込みで
@@ -5263,6 +5265,17 @@ function isVerifiedUser(){
 
 function requireVerifiedUser(){
   if(isVerifiedUser()) return true;
+  // state.profileがnullなのが「本当に未登録」なのか「起動時のcurrentAuthUser()が
+  // タイムアウトして確認できなかっただけ」なのか、profileLoadedを見ないと
+  // 区別できない。区別せずここで「未登録」と決めつけてログイン画面に送ると、
+  // 実際には登録済みのユーザーが使おうとするたびに締め出されて見える
+  // (これまで繰り返し報告されていた「視聴記録が消える」の実体はこれだった)。
+  // 未確定の間はログイン画面へ送らず、裏で読み直すだけにする。
+  if(!state.profileLoaded){
+    showToast('登録状況を確認しています。数秒後にもう一度お試しください');
+    loadProfile().then(() => updateHeader());
+    return false;
+  }
   showToast('この機能を使うには、メールの登録(1分で終わります)が必要です');
   goMagicLogin();
   return false;
@@ -5415,7 +5428,16 @@ function clearProfilePhoto(){
 }
 
 function onProfileChipTap(){
-  if(state.profile){ goProfile(); } else { goOnboarding(); }
+  if(state.profile){ goProfile(); return; }
+  // requireVerifiedUser()と同じ理由: profile未確定のままgoOnboarding()へ
+  // 送ると、登録済みユーザーがタップするたびアカウントごと消えたように
+  // 見えてしまう。確定していなければ読み直してから振り分ける。
+  if(!state.profileLoaded){
+    showToast('登録状況を確認しています。数秒後にもう一度お試しください');
+    loadProfile().then(() => { updateHeader(); if(state.profile) goProfile(); });
+    return;
+  }
+  goOnboarding();
 }
 
 function goOnboarding(){
@@ -6962,6 +6984,26 @@ async function init(){
   renderFeaturedBanner();
   renderHomeRows();
   updateHeader();
+
+  // 上のPromise.allで一斉に叩いたcurrentAuthUser()が(希にある)gotrue-jsの
+  // ハングでタイムアウトした場合、profile/myLogs/mySubmittedMovies/
+  // myReviewRowsのどれかがこの時点でまだ読めていないことがある。何もしないと
+  // ユーザーが実際に操作する(プロフィールを開く・記録を書こうとする等)まで
+  // 直らず、その操作自体がrequireVerifiedUser()に「未登録」と誤判定されて
+  // ログイン画面に弾かれることさえある。表示はもう終わっているので、
+  // 数秒待って裏で読み直し、直っていたら静かに描き直す。
+  if(!state.profileLoaded || !state.myLogsLoaded || !state.mySubmittedMoviesLoaded || !state.myReviewRowsLoaded){
+    wait(2000).then(async () => {
+      await Promise.all([
+        state.profileLoaded ? null : loadProfile(),
+        state.myLogsLoaded ? null : loadMyLogs(),
+        state.mySubmittedMoviesLoaded ? null : loadMySubmittedMovies(),
+        state.myReviewRowsLoaded ? null : loadMyReviews()
+      ]);
+      updateHeader();
+      if(document.getElementById('view-profile').classList.contains('active')) goProfile();
+    });
+  }
 
   // 共有リンク(?share=<token>)から開かれた場合は、ログイン状態に関わらずそのリストだけを
   // 表示する。MOVIESの読み込み後(=上のPromise.all後)である必要がある。
