@@ -7008,7 +7008,7 @@ async function addMovieToList(listId){
   if(listId === 'pocket'){
     await togglePocketMembership(state.currentMovieId);
     renderAddToListOptions();
-    showToast(isInPocket(state.currentMovieId) ? 'ポケットに入れました' : '海に帰りました');
+    showToast(isInPocket(state.currentMovieId) ? 'ポケットに入れました' : 'ポケットから出しました');
     return;
   }
   if(listId === 'watch_later'){
