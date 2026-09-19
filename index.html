@@ -819,10 +819,27 @@
     border-radius: 50%;
     opacity: 0.85;
   }
+  /* 背景は雰囲気を伝える色のぼかしのままにしつつ、その上に実物の
+     ポスターを本来の縦横比(2:3)を保ったまま1枚だけ乗せる。
+     ワイドな16:9の帯に引き伸ばして敷き詰めたりはしない。 */
+  .poster-artwork{
+    position: absolute; left: 16px; bottom: 14px;
+    width: 34%; max-width: 130px;
+    aspect-ratio: 2 / 3;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 12px 28px -8px rgba(0,0,0,0.55);
+    z-index: 2;
+  }
+  .poster-artwork img{
+    width: 100%; height: 100%; object-fit: cover; display: block;
+  }
   .poster-motif{
     position: absolute; inset: 0;
     display:flex; align-items:flex-end; justify-content:flex-end;
-    padding: 0 16px 14px;
+    /* 左下に実物のポスター(.poster-artwork、最大130px幅)を敷いているので、
+       タイトルの折り返し幅がそこへ被らないよう左側に空けておく */
+    padding: 0 16px 14px 150px;
   }
   .poster-motif::before{
     content: "";
@@ -1866,6 +1883,7 @@
     <div class="detail-poster" id="d-poster">
       <div class="poster-mood-blur" id="poster-mood-blur"></div>
       <div class="poster-grain"></div>
+      <div class="poster-artwork" id="poster-artwork" style="display:none;"><img id="poster-artwork-img" alt="" loading="eager" decoding="async"></div>
       <div class="poster-motif" id="poster-motif"></div>
       <button class="poster-info-btn" onclick="toggleMovieInfoPanel()" title="作品情報">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
@@ -4165,6 +4183,16 @@ function renderPosterMood(m){
     return `<div class="mood-blob" style="top:${pos.top}; left:${pos.left}; width:${pos.size}; height:${pos.size}; background:${tagColor(tag)};"></div>`;
   }).join('');
 
+  // 色のぼかしは雰囲気付けとして残しつつ、実物のポスターがあれば
+  // その上に縦横比を保ったまま1枚だけ乗せる(無ければ今まで通り色だけ)。
+  const artworkEl = document.getElementById('poster-artwork');
+  if(m.posterUrl){
+    document.getElementById('poster-artwork-img').src = m.posterUrl;
+    artworkEl.style.display = 'block';
+  } else {
+    artworkEl.style.display = 'none';
+  }
+
   // タイトルをポスターの主役として配置(Zパターンの視線の終着点=右下)
   const motifEl = document.getElementById('poster-motif');
   motifEl.innerHTML = `<div class="poster-title-row"><div class="poster-title-type">${m.title}</div><div class="poster-year-type">${m.year}年公開</div></div>`;
@@ -4216,7 +4244,14 @@ function updateLoveUI(m){
   document.getElementById('heart-hint').style.display = myLevel > 0 ? 'none' : 'block';
 }
 
+// 連打(0→1→2→3→0→…と素早くタップし続ける)すると、以前は前のタップ分の
+// エフェクトが消えないうちに次のタップ分が重なって増え続け、56px四方の
+// ボタンの上でハート・吹き出し・バーストが何個も同時に暴れて「ブレブレ」に
+// 見える原因になっていた。新しく出す前に同じ種類の残り物を片付け、
+// 常にその瞬間は1セットだけが画面に残るようにする。
 function spawnBurst(container){
+  container.querySelectorAll('.heart-burst, .heart-spark').forEach(el => el.remove());
+
   const ring1 = document.createElement('div');
   ring1.className = 'heart-burst';
   container.appendChild(ring1);
@@ -4242,6 +4277,7 @@ function spawnBurst(container){
 }
 
 function spawnFloatingHeart(container){
+  container.querySelectorAll('.heart-float').forEach(el => el.remove());
   const el = document.createElement('div');
   el.className = 'heart-float';
   el.innerHTML = HEART_ICON;
@@ -4256,6 +4292,7 @@ const LOVE_MESSAGES_BY_LEVEL = {
 };
 
 function spawnLoveBubble(container, level){
+  container.querySelectorAll('.love-bubble').forEach(el => el.remove());
   const pool = LOVE_MESSAGES_BY_LEVEL[level] || LOVE_MESSAGES_BY_LEVEL[1];
   const el = document.createElement('div');
   el.className = 'love-bubble';
