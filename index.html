@@ -1480,21 +1480,26 @@
   }
   .history-item{
     background: var(--surface); border:1px solid var(--line);
-    border-radius: 12px; padding: 12px 14px; margin-bottom: 10px;
-    display:flex; align-items:center; gap:12px; cursor:pointer;
+    border-radius: 12px; padding: 14px 16px; margin-bottom: 10px;
+    display:flex; align-items:center; gap:14px; cursor:pointer;
   }
   .history-item .h-poster{
-    width: 40px; height: 56px; border-radius: 6px; flex-shrink:0;
+    width: 52px; height: 74px; border-radius: 7px; flex-shrink:0;
     display:flex; align-items:center; justify-content:center;
     font-family:'M PLUS Rounded 1c', sans-serif; font-weight:700;
-    font-size: 15px; color: rgba(255,255,255,0.85);
+    font-size: 17px; color: rgba(255,255,255,0.85);
     position: relative; overflow: hidden;
   }
   .history-item .h-poster img{
     position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
-  .history-item .h-title{ font-weight:600; font-size:13.5px; color: var(--ink); }
-  .history-item .h-sub{ font-size:11.5px; color: var(--ink-soft); margin-top:2px; }
+  .history-item .h-title{ font-weight:600; font-size:13.5px; color: var(--ink); line-height: 1.4; }
+  /* 感想が長いと小さいポスターの横に文字がぎっしり詰まって見えるため、
+     2行に切り詰めて行間にも余裕を持たせる。 */
+  .history-item .h-sub{
+    font-size: 11.5px; color: var(--ink-soft); margin-top: 4px; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
 
   .pocket-progress{
     background: var(--surface); border:1px solid var(--line);
@@ -3396,6 +3401,9 @@ function renderMovieCards(root, list, emptyMessage, opts){
 // ポスター画像の上に重ねて表示する(ポケット一覧向け)。
 // opts.returnTo: 指定すると、このカードから開いた詳細ページの「戻る」が
 // 一覧ではなくこの作品IDの詳細ページに戻るようになる(シリーズ棚向け)。
+// opts.returnToView: 指定すると、「戻る」が一覧ではなく指定した画面IDに
+// 戻るようになる(診断結果のおすすめ欄など、別作品ではなく元の画面に
+// 戻したい場所向け)。{id, label}の形。
 // TMDbのposter_pathがある作品は実際のポスター画像を表示し、無い作品は
 // 従来通り色ブロック+頭文字にフォールバックする。画像はloading="lazy"で、
 // 画面外のカードは実際にスクロールされるまで読み込まない。
@@ -3409,6 +3417,8 @@ function buildCardHTML(m, opts){
     : (hasPoster ? '' : m.title.charAt(0));
   const clickHandler = (opts && opts.returnTo != null)
     ? `goDetailWithReturn(${m.id}, ${opts.returnTo})`
+    : (opts && opts.returnToView)
+    ? `goDetailWithViewReturn(${m.id}, '${opts.returnToView.id}', '${opts.returnToView.label}')`
     : `goDetail(${m.id})`;
   return `
     <div class="result-card" onclick="${clickHandler}">
@@ -4469,16 +4479,18 @@ function toggleMovieInfoPanel(){
   panel.style.display = panel.style.display === 'block' ? 'none' : 'block';
 }
 
-// シリーズ棚・シリーズ一覧モーダルから別作品を開いたときだけ、その詳細ページの
-// 「戻る」ボタンを一覧ページではなく元の作品の詳細ページに向ける。
-// pendingDetailReturnToはgoDetail()を呼ぶ直前だけ立てる一回限りの合図で、
+// シリーズ棚・シリーズ一覧モーダル・診断結果などから別作品を開いたときだけ、
+// その詳細ページの「戻る」ボタンを一覧ページではなく元の場所に向ける。
+// 戻り先は「別の作品の詳細ページ」(type:'movie')と「特定の画面」
+// (type:'view'、診断結果からの遷移など)の2種類がありうる。
+// pendingDetailReturnはgoDetail()を呼ぶ直前だけ立てる一回限りの合図で、
 // goDetail側で読み取ったらすぐ空に戻す(それ以外の経路からの遷移は今まで通り
 // 「一覧に戻る」のまま)。
-let pendingDetailReturnTo = null;
-let detailReturnTo = null;
+let pendingDetailReturn = null;
+let detailReturn = null;
 
-function goDetailWithReturn(id, returnToId){
-  pendingDetailReturnTo = returnToId;
+function goDetailWithReturn(id, returnToMovieId){
+  pendingDetailReturn = { type: 'movie', id: returnToMovieId };
   // シリーズ一覧モーダルを開いたままだと、遷移後の詳細ページの上に
   // ドロワーが被って表示されたままになる(閉じるアニメーションと並行して
   // 遷移させることで、ドロワーがスライドダウンして退くような見え方になる)。
@@ -4486,20 +4498,28 @@ function goDetailWithReturn(id, returnToId){
   goDetail(id);
 }
 
+// 診断結果やおすすめ欄など、「別の作品」ではなく「元いた画面」に戻したい場所から使う。
+function goDetailWithViewReturn(id, viewId, label){
+  pendingDetailReturn = { type: 'view', id: viewId, label };
+  goDetail(id);
+}
+
 function goDetailBack(){
-  if(detailReturnTo != null){
-    const returnId = detailReturnTo;
-    detailReturnTo = null;
-    goDetail(returnId);
-  } else {
-    goHome();
+  if(detailReturn){
+    const ret = detailReturn;
+    detailReturn = null;
+    if(ret.type === 'view'){ switchView(ret.id); return; }
+    if(ret.type === 'movie'){ goDetail(ret.id); return; }
   }
+  goHome();
 }
 
 async function goDetail(id){
-  detailReturnTo = pendingDetailReturnTo;
-  pendingDetailReturnTo = null;
-  document.getElementById('d-back-btn').textContent = detailReturnTo != null ? '← 元の作品に戻る' : '← 一覧に戻る';
+  detailReturn = pendingDetailReturn;
+  pendingDetailReturn = null;
+  document.getElementById('d-back-btn').textContent = detailReturn
+    ? (detailReturn.label || '← 元の作品に戻る')
+    : '← 一覧に戻る';
 
   const m = MOVIES.find(x => x.id === id);
   state.currentMovieId = id;
@@ -6200,18 +6220,26 @@ async function loadMyPocket(){
 // 「自分だけの結果」に感じられるようにする。冷たい分析用語(データ・構造・
 // 分析・傾向・パターンなど)は使わず、「〜かもしれません」「〜のようですね」と
 // 余白を残す言い回しにする。
-const THEME_NAME = {
-  "楽しい":         "陽だまりの中の冒険者",
-  "感動":           "涙のあとに咲く花",
-  "リラックス":     "凪いだ心の航海士",
-  "ワクワク":       "好奇心という名の羅針盤",
-  "怖い":           "闇を恐れず歩む探検家",
-  "美しい":         "静かな美意識の錬金術師",
-  "ドキドキ":       "鼓動が導く道しるべ",
-  "笑い":           "軽やかな魂の旅人",
-  "悲しい":         "優しい涙を知る者",
-  "考えさせられる": "問いを抱いて歩む賢者"
+// 1つのタグに対して複数の名前を持たせ、診断のたびにランダムに1つを選ぶ。
+// 同じタグの人が全員同じ名前になってしまうと「みんな同じ」に見えてしまうため。
+const THEME_NAME_VARIANTS = {
+  "楽しい":         ["陽だまりの中の冒険者", "小さな喜びを集める採集者", "笑顔の種をまく人", "毎日に光をともす者"],
+  "感動":           ["涙のあとに咲く花", "心の震えを大切にする人", "誰かの物語に涙する人", "静かに胸を熱くする者"],
+  "リラックス":     ["凪いだ心の航海士", "風にまかせて漂う人", "静寂を味方につける人", "深呼吸を知る旅人"],
+  "ワクワク":       ["好奇心という名の羅針盤", "未知への扉を開く人", "胸躍る瞬間を追う者", "冒険心を燃やす探求者"],
+  "怖い":           ["闇を恐れず歩む探検家", "恐れごと抱きしめる者", "闇にひそむ美を見つける人", "スリルを友とする挑戦者"],
+  "美しい":         ["静かな美意識の錬金術師", "光と影を愛でる人", "美の欠片を拾い集める者", "静謐な世界に生きる人"],
+  "ドキドキ":       ["鼓動が導く道しるべ", "胸の高鳴りを信じる人", "スリルの中に生きる者", "高揚感を追いかける旅人"],
+  "笑い":           ["軽やかな魂の旅人", "日常にユーモアを見出す人", "笑いで世界を軽くする者", "陽気な風を運ぶ人"],
+  "悲しい":         ["優しい涙を知る者", "涙の中に強さを見る人", "痛みを美しさに変える者", "静かな悲しみに寄り添う人"],
+  "考えさせられる": ["問いを抱いて歩む賢者", "答えのない問いを愛する人", "物語の奥を見つめる者", "静かに思索を巡らす人"]
 };
+
+function pickThemeName(topTag){
+  const variants = THEME_NAME_VARIANTS[topTag];
+  if(!variants || !variants.length) return "まだ名前のない物語";
+  return variants[Math.floor(Math.random() * variants.length)];
+}
 
 // 誰にでも当てはまりうる、両価的(バーナム効果)な感性の強み。
 const SENSE_LIGHT = {
@@ -6241,8 +6269,8 @@ const FEELING_WORD = {
   "考えさせられる": "じっくり考えを巡らせたい気分"
 };
 
-function generateDiagnosisName(topTag){
-  return `『${THEME_NAME[topTag] || "まだ名前のない物語"}』`;
+function generateDiagnosisName(themeTitle){
+  return `『${themeTitle}』`;
 }
 
 function generateDiagnosis(pocketMovies){
@@ -6252,7 +6280,8 @@ function generateDiagnosis(pocketMovies){
   const topTag = sortedTags[0];
   const secondTag = sortedTags[1];
 
-  const diagnosisName = generateDiagnosisName(topTag);
+  const themeTitle = pickThemeName(topTag);
+  const diagnosisName = generateDiagnosisName(themeTitle);
   const titlesText = pocketMovies.map(m => `「${unescapeHtml(m.title)}」`).join('・');
 
   const cardSection = [
@@ -6282,6 +6311,7 @@ function generateDiagnosis(pocketMovies){
 
   return {
     name: diagnosisName,
+    themeTitle: themeTitle,
     body: body,
     recommendedIds: recommendedIds,
     topTag: topTag
@@ -6920,7 +6950,7 @@ function renderPocketView(){
   const visiblePocket = sortedPocket.slice(0, pocketShownCount);
 
   const itemsRoot = document.getElementById('pocket-items');
-  renderMovieCards(itemsRoot, visiblePocket, 'ポケットの中は波が連れ去りました。また追加してみて下さい。', { overlayTitle: true });
+  renderMovieCards(itemsRoot, visiblePocket, 'ポケットの中はまだ空っぽです。気になる映画を波打ち際に置いていくように、追加してみてください。', { overlayTitle: true });
 
   const moreBtn = document.getElementById('pocket-expand-btn');
   const remaining = sortedPocket.length - pocketShownCount;
@@ -7035,16 +7065,16 @@ function toggleDiagnosisPick(id){
 }
 
 // 診断の「シネマ・タイプ」カード。ランクや段階の概念を一切持たず、10個の
-// 感情タグの色×二つ名(THEME_NAME)をそのまま使う(占い・性格診断寄りの
+// 感情タグの色×二つ名(THEME_NAME_VARIANTS、タグごとに複数持たせてある)を使う(占い・性格診断寄りの
 // 水平な分類。優劣は無い)。同じ関数を、新しく出た結果にも過去の記録にも使う。
 let currentDiagnosisShareState = null;
 
-function applyDiagnosisShareCard(cardId, topTag, movieTitles){
+function applyDiagnosisShareCard(cardId, topTag, themeTitle, movieTitles){
   const card = document.getElementById(cardId);
   if(!card) return;
   const color = tagColor(topTag);
   card.style.background = `linear-gradient(155deg, ${color}dd 0%, ${color} 55%, ${color}bb 100%)`;
-  card.querySelector('.diagnosis-share-title').textContent = THEME_NAME[topTag] || 'まだ名前のない物語';
+  card.querySelector('.diagnosis-share-title').textContent = themeTitle || 'まだ名前のない物語';
   card.querySelector('.diagnosis-share-blurb').textContent = SENSE_LIGHT[topTag] || '';
   const moviesEl = card.querySelector('.diagnosis-share-movies');
   if(moviesEl){
@@ -7059,13 +7089,15 @@ function applyDiagnosisShareCard(cardId, topTag, movieTitles){
 // 過去の記録の再表示では省く。
 function applyDiagnosisResultDisplay(historyEntry){
   const movies = (historyEntry.movieIds || []).map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
+  // history.nameは『』で囲って保存してあるので、カード表示用に中身だけ取り出す
+  const themeTitle = (historyEntry.name || '').replace(/^『|』$/g, '') || 'まだ名前のない物語';
 
-  applyDiagnosisShareCard('diagnosis-share-card', historyEntry.topTag, movies.map(m => m.title));
+  applyDiagnosisShareCard('diagnosis-share-card', historyEntry.topTag, themeTitle, movies.map(m => m.title));
   currentDiagnosisShareState = { name: historyEntry.name, topTag: historyEntry.topTag };
   document.getElementById('new-diagnosis-text').textContent = historyEntry.body;
 
   document.getElementById('new-diagnosis-movies').innerHTML = movies.map(m => `
-    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetail(${m.id})">
+    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetailWithViewReturn(${m.id}, 'view-pocket', '← 診断に戻る')">
       <div class="poster-thumb-title">${m.title}</div>
     </div>
   `).join('');
@@ -7083,9 +7115,9 @@ function applyDiagnosisResultDisplay(historyEntry){
 // 使えない環境(主にPCブラウザ)ではクリップボードへのコピーにフォールバックする。
 async function shareDiagnosisCard(){
   if(!currentDiagnosisShareState) return;
-  const { topTag } = currentDiagnosisShareState;
-  const themeName = THEME_NAME[topTag] || 'まだ名前のない物語';
-  const shareText = `私のシネマ・タイプは『${themeName}』でした。\n${window.location.origin}${window.location.pathname}`;
+  // nameは実際に授かった名前(『』込み、ランダムに選ばれたバリアント)をそのまま使う。
+  // topTagから再度引き直すと、人によって違う名前を選んだ意味が無くなってしまう。
+  const shareText = `私のシネマ・タイプは${currentDiagnosisShareState.name}でした。\n${window.location.origin}${window.location.pathname}`;
 
   if(navigator.share){
     try{
@@ -7111,13 +7143,13 @@ async function runNewDiagnosis(){
   const selectedMovies = diagnosisSelection.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
   const diagnosis = generateDiagnosis(selectedMovies);
 
-  applyDiagnosisShareCard('diagnosis-share-card', diagnosis.topTag, selectedMovies.map(m => m.title));
+  applyDiagnosisShareCard('diagnosis-share-card', diagnosis.topTag, diagnosis.themeTitle, selectedMovies.map(m => m.title));
   currentDiagnosisShareState = { name: diagnosis.name, topTag: diagnosis.topTag };
   document.getElementById('new-diagnosis-text').textContent = diagnosis.body;
 
   const moviesEl = document.getElementById('new-diagnosis-movies');
   moviesEl.innerHTML = selectedMovies.map(m => `
-    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetail(${m.id})">
+    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetailWithViewReturn(${m.id}, 'view-pocket', '← 診断に戻る')">
       <div class="poster-thumb-title">${m.title}</div>
     </div>
   `).join('');
@@ -7127,7 +7159,8 @@ async function runNewDiagnosis(){
   if(recommendedIds.length > 0){
     const recMovies = recommendedIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
     recEl.style.display = 'block';
-    recEl.innerHTML = `<div class="pocket-rec-label">今のあなたへのおすすめ</div><div class="results">${recMovies.map(buildCardHTML).join('')}</div>`;
+    const recOpts = { returnToView: { id: 'view-pocket', label: '← 診断に戻る' } };
+    recEl.innerHTML = `<div class="pocket-rec-label">今のあなたへのおすすめ</div><div class="results">${recMovies.map(m => buildCardHTML(m, recOpts)).join('')}</div>`;
   } else {
     recEl.style.display = 'none';
     recEl.innerHTML = '';
