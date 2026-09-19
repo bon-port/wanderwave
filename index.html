@@ -2007,11 +2007,6 @@
     </div>
 
     <div class="search-results-grid" id="results"></div>
-    <div class="results-pagination" id="results-pagination" style="display:none;">
-      <button class="ghost-btn results-pagination-btn" id="results-page-prev" onclick="goToResultsPage(-1)">‹ 前へ</button>
-      <span class="results-pagination-status" id="results-pagination-status"></span>
-      <button class="ghost-btn results-pagination-btn" id="results-page-next" onclick="goToResultsPage(1)">次へ ›</button>
-    </div>
 
     <div id="home-rows"></div>
   </div>
@@ -3982,16 +3977,21 @@ function matchesVibeAlias(m, normalizedQuery){
 }
 
 // 検索/タグ絞り込みの結果は、件数が増えても一度にDOMへ描画する枚数が
-// 増えすぎないよう、RESULTS_PAGE_SIZE件ずつページ送りで表示する。
+// 増えすぎないよう、RESULTS_PAGE_SIZEずつ段階的に描画する。
 // (作品を数千本規模に増やす予定があり、絞り込みが緩いと一致件数が
 //  非常に多くなりうるため。フィルタ自体はMOVIES配列に対する軽量な
 //  JS処理なので、ここで重くなるのは専らDOM描画の枚数)
-// 以前は「もっと見る」で下に継ぎ足す方式だったが、押すたびにページが
-// どんどん長くなり、ボタン自体も下へ下へ追いやられて使いづらかったため、
-// ページ単位で切り替える方式にしている。
+// 以前は「前へ/次へ」ボタンでページを切り替える方式だったが、押すたびに
+// 画面がガクッと切り替わり、スクロール位置も先頭に戻ってしまっていた。
+// その前は「もっと見る」ボタンで継ぎ足す方式で、それはそれで押すたびに
+// ボタン自体が下へ下へ追いやられる問題があった。どちらもユーザーの
+// スクロール操作を遮る割り込みだったため、IntersectionObserverで
+// 下端に近づいたら自動で継ぎ足す方式にする。ボタンも「戻る」もなく、
+// スクロール(スライド)しているだけで途切れなく増えていく。
 const RESULTS_PAGE_SIZE = 30;
 let resultsFiltered = [];
-let resultsPage = 0;
+let resultsShownCount = RESULTS_PAGE_SIZE;
+let resultsSentinelObserver = null;
 
 function renderResults(){
   const root = document.getElementById('results');
@@ -4003,7 +4003,6 @@ function renderResults(){
     // 検索・タグ選択をしてない間は、おすすめの棚だけを見せる
     root.style.display = 'none';
     root.innerHTML = '';
-    document.getElementById('results-pagination').style.display = 'none';
     homeRowsEl.style.display = 'block';
     return;
   }
@@ -4032,37 +4031,33 @@ function renderResults(){
     return matchQuery && matchTags && matchIntensity && !matchesExcludedWord(m);
   });
 
-  // 検索条件が変わるたびに1ページ目から表示し直す
-  resultsPage = 0;
+  // 検索条件が変わるたびに最初のRESULTS_PAGE_SIZE件から表示し直す
+  resultsShownCount = RESULTS_PAGE_SIZE;
   renderVisibleResults();
 }
 
 function renderVisibleResults(){
   const root = document.getElementById('results');
-  const totalPages = Math.max(1, Math.ceil(resultsFiltered.length / RESULTS_PAGE_SIZE));
-  resultsPage = Math.min(Math.max(resultsPage, 0), totalPages - 1);
-
-  const start = resultsPage * RESULTS_PAGE_SIZE;
-  const visible = resultsFiltered.slice(start, start + RESULTS_PAGE_SIZE);
+  const visible = resultsFiltered.slice(0, resultsShownCount);
   renderMovieCards(root, visible, '条件に合う映画が見つかりませんでした。タグを減らすか、表現度の絞り込みを外してみましょう。');
 
-  const pagination = document.getElementById('results-pagination');
-  if(resultsFiltered.length <= RESULTS_PAGE_SIZE){
-    pagination.style.display = 'none';
-    return;
-  }
-  pagination.style.display = 'flex';
-  document.getElementById('results-pagination-status').textContent =
-    `${resultsPage + 1} / ${totalPages}ページ(全${resultsFiltered.length}件)`;
-  document.getElementById('results-page-prev').disabled = resultsPage === 0;
-  document.getElementById('results-page-next').disabled = resultsPage >= totalPages - 1;
-}
+  if(resultsSentinelObserver){ resultsSentinelObserver.disconnect(); resultsSentinelObserver = null; }
+  const remaining = resultsFiltered.length - visible.length;
+  if(remaining <= 0) return;
 
-function goToResultsPage(delta){
-  resultsPage += delta;
-  renderVisibleResults();
-  // ページを送るたびに一覧の先頭までスクロールし、位置を見失わないようにする
-  document.getElementById('results').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  // 一覧の末尾に見えない番人要素を置き、それが画面に近づいたら(rootMarginで
+  // 手前から先読み)自動で次のRESULTS_PAGE_SIZE件を継ぎ足す。ボタンを押す
+  // 操作を挟まず、スクロールし続けているだけで自然に増えていくようにする。
+  root.insertAdjacentHTML('beforeend', '<div id="results-sentinel" style="grid-column:1/-1;"></div>');
+  const sentinel = document.getElementById('results-sentinel');
+  resultsSentinelObserver = new IntersectionObserver((entries) => {
+    if(!entries[0].isIntersecting) return;
+    resultsSentinelObserver.disconnect();
+    resultsSentinelObserver = null;
+    resultsShownCount += RESULTS_PAGE_SIZE;
+    renderVisibleResults();
+  }, { rootMargin: '600px 0px' });
+  resultsSentinelObserver.observe(sentinel);
 }
 
 // シリーズの棚が長すぎると横スクロールが延々続いて使いにくいので、
