@@ -1669,10 +1669,11 @@
   }
   /* 視聴記録の「もっと見る」一覧は、タイトルを重ねた縦長タイルが並ぶだけの
      ページなので、110px幅3列だとスマホ実機ではギチギチに詰まって見える。
-     もう少し幅を広げて2列にし、余白も増やす。 */
+     もう少し幅を広げて2列にし、余白も増やす(タイトルは画像の上に重ねず
+     renderRecordTileHTML側で下に分離済み)。 */
   #viewing-record-grid.pocket-grid{
-    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-    gap: 14px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 18px 16px;
   }
   .pocket-grid .result-card{
     flex: none; width: 100%;
@@ -5953,12 +5954,16 @@ function renderHistoryItemHTML(e){
   `;
 }
 
+// タイトルをポスター上に重ねず、下に独立したテキストとして置く(検索結果の
+// カードと同じ組み方)。画像の上に文字を詰め込むと、グリッドの余白を広げても
+// タイル自体は窮屈に見えてしまうため。
 function renderRecordTileHTML(e){
   const posterImg = e.posterUrl ? `<img src="${e.posterUrl}" alt="" loading="lazy" decoding="async">` : '';
-  const initialOrNothing = e.posterUrl ? '' : `<span class="poster-thumb-initial">${escapeHtml(e.initial)}</span>`;
+  const initialOnly = e.posterUrl ? '' : escapeHtml(e.initial);
   return `
     <div class="result-card" onclick="${e.onClick}">
-      <div class="poster-thumb" style="background:${e.poster}">${posterImg}${initialOrNothing}<div class="poster-thumb-title">${escapeHtml(e.title)}</div></div>
+      <div class="poster-thumb" style="background:${e.poster}">${posterImg}${initialOnly}</div>
+      <div class="result-title">${escapeHtml(e.title)}</div>
     </div>
   `;
 }
