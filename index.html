@@ -419,23 +419,20 @@
     -webkit-box-orient: vertical;
     overflow: hidden;
   }
+  /* 自動で流れつつ、指でもドラッグしてスクロールできるようにするため、
+     transformアニメーションではなくscrollLeftベース(JS側)で動かす。
+     ここはネイティブな横スクロールコンテナにするだけ。 */
   .review-feed-marquee{
     margin-top: 22px;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
   }
+  .review-feed-marquee::-webkit-scrollbar{ height: 5px; }
+  .review-feed-marquee::-webkit-scrollbar-thumb{ background: var(--line); border-radius: 3px; }
   .review-feed-track{
     display: flex; gap: 16px;
     width: max-content;
-    animation: reviewFeedScroll 90s linear infinite;
-  }
-  /* ホバーできる端末(マウス)だけ一時停止させる。タッチ端末だと:hoverが
-     タップ後も張り付いたままになり、ループが途中で止まって見えるため。 */
-  @media (hover: hover){
-    .review-feed-track:hover{ animation-play-state: paused; }
-  }
-  @keyframes reviewFeedScroll{
-    from{ transform: translateX(0); }
-    to{ transform: translateX(-50%); }
   }
   .poster-thumb{
     width: 148px; height: 210px;
@@ -1421,6 +1418,10 @@
     display:flex; align-items:center; justify-content:center;
     font-family:'M PLUS Rounded 1c', sans-serif; font-weight:700;
     font-size: 15px; color: rgba(255,255,255,0.85);
+    position: relative; overflow: hidden;
+  }
+  .history-item .h-poster img{
+    position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover;
   }
   .history-item .h-title{ font-weight:600; font-size:13.5px; color: var(--ink); }
   .history-item .h-sub{ font-size:11.5px; color: var(--ink-soft); margin-top:2px; }
@@ -1654,6 +1655,13 @@
     font-size: 10px; color: rgba(255,255,255,0.75);
     text-shadow: 0 2px 6px rgba(0,0,0,0.5);
   }
+  .list-card-badge{
+    position: absolute; top: 8px; left: 8px;
+    font-size: 9.5px; font-weight: 600; padding: 3px 8px; border-radius: 20px;
+    backdrop-filter: blur(4px);
+  }
+  .list-card-badge.public{ background: rgba(79,157,137,0.28); color: #9fe0cd; border: 1px solid rgba(79,157,137,0.5); }
+  .list-card-badge.private{ background: rgba(255,255,255,0.1); color: rgba(255,255,255,0.75); border: 1px solid rgba(255,255,255,0.15); }
   .list-card-empty{
     display:flex; align-items:center; justify-content:center;
     color: var(--ink-soft); font-size:11px;
@@ -1669,6 +1677,37 @@
     font-size: 21px; color: var(--plum-deep);
     margin-bottom: 12px;
   }
+
+  /* シェア用の「シネマ・タイプ」カード。ランクや段階の無い10色の
+     感情タグの色をそのまま使い、横に並べば誰でも気軽に見せ合える
+     占い/性格診断寄りのトーンにする(--love等の固定色は使わず、
+     診断結果のtopTagごとに背景色が変わる)。 */
+  .diagnosis-share-card{
+    border-radius: 20px; padding: 22px 20px; margin-bottom: 18px;
+    color: #14100c; position: relative; overflow: hidden;
+  }
+  .diagnosis-share-eyebrow{
+    font-family:'Baloo 2', sans-serif; font-weight:700; font-size: 11px;
+    letter-spacing: .05em; opacity: .65;
+  }
+  .diagnosis-share-title{
+    font-family:'M PLUS Rounded 1c', sans-serif; font-weight: 800;
+    font-size: 22px; line-height: 1.3; margin: 8px 0 6px;
+  }
+  .diagnosis-share-blurb{ font-size: 12.5px; line-height: 1.75; opacity: .85; }
+  .diagnosis-share-movies{ margin-top: 14px; display:flex; gap: 6px; flex-wrap: wrap; }
+  .diagnosis-share-movie-chip{
+    font-size: 10.5px; font-weight: 600; padding: 4px 9px; border-radius: 16px;
+    background: rgba(255,255,255,0.35);
+  }
+  .diagnosis-share-actions{ margin-top: 16px; display:flex; gap: 8px; }
+  .diagnosis-share-btn{
+    font-family:'M PLUS Rounded 1c', sans-serif; font-weight: 700; font-size: 12.5px;
+    padding: 8px 14px; border-radius: 20px; border: none; cursor: pointer;
+    background: rgba(20,16,12,0.85); color: #fff;
+    display:flex; align-items:center; gap: 6px;
+  }
+  .diagnosis-share-btn:active{ transform: scale(0.97); }
   .pocket-diagnosis-rec{ margin-top: 16px; }
   .pocket-rec-label{
     font-size: 11.5px; color: var(--ink-soft); font-weight:600; margin-bottom: 8px;
@@ -2134,7 +2173,18 @@
 
       <div id="diagnosis-result" class="pocket-diagnosis" style="display:none;">
         <div class="pocket-diagnosis-title">今のあなたのシネマ・テーマ</div>
-        <div class="pocket-diagnosis-name" id="new-diagnosis-name"></div>
+        <div class="diagnosis-share-card" id="diagnosis-share-card">
+          <div class="diagnosis-share-eyebrow">あなたのシネマ・タイプ</div>
+          <div class="diagnosis-share-title" id="diagnosis-share-title"></div>
+          <div class="diagnosis-share-blurb" id="diagnosis-share-blurb"></div>
+          <div class="diagnosis-share-movies" id="diagnosis-share-movies"></div>
+          <div class="diagnosis-share-actions">
+            <button class="diagnosis-share-btn" onclick="shareDiagnosisCard()">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v14"/></svg>
+              シェアする
+            </button>
+          </div>
+        </div>
         <div class="pocket-diagnosis-text" id="new-diagnosis-text"></div>
         <div id="new-diagnosis-movies" class="diagnosis-result-movies"></div>
         <div id="new-diagnosis-rec" class="pocket-diagnosis-rec" style="display:none;"></div>
@@ -2149,7 +2199,7 @@
         <button class="link-btn" onclick="goMyLogForm()">+ 記録を書く</button>
       </div>
       <div id="viewing-record-list"></div>
-      <button class="link-btn diagnosis-history-link" id="viewing-record-more-btn" style="display:none;" onclick="openViewingRecordModal()"></button>
+      <button class="link-btn diagnosis-history-link" id="viewing-record-more-btn" style="display:none;" onclick="goViewingRecordAll()"></button>
 
       <div class="pocket-divider"></div>
 
@@ -2485,14 +2535,14 @@
   </div>
 </div>
 
-<div class="diagnosis-history-overlay" id="viewing-record-overlay" style="display:none;" onclick="if(event.target===this) closeViewingRecordModal()">
-  <div class="diagnosis-history-drawer" id="viewing-record-drawer">
-    <div class="diagnosis-history-header">
-      <div class="diagnosis-history-title">視聴記録</div>
-      <button class="diagnosis-history-close" onclick="closeViewingRecordModal()">×</button>
-    </div>
-    <div id="viewing-record-grid" class="pocket-grid"></div>
+<!-- ============ VIEWING RECORD (ALL) VIEW ============ -->
+<div class="view" id="view-viewing-record">
+  <button class="back-btn" onclick="goProfile()">← プロフィールに戻る</button>
+  <div class="detail-head">
+    <h2>視聴記録</h2>
+    <div class="sub">これまでの記録を、新しい順に並べています</div>
   </div>
+  <div id="viewing-record-grid" class="pocket-grid"></div>
 </div>
 
 <!-- この2つは以前<head>にあり、ページ本体のHTML(スプラッシュ画面を含む)より
@@ -3398,23 +3448,77 @@ function renderHomeRows(){
     .slice(0, 20);
 
   if(reviewCards.length){
-    // 手でスワイプする他の棚と違い、ここは常に自動で流れ続ける演出にする。
-    // シームレスにループさせるため、カード列を2回連続で並べてから
-    // ちょうど半分ぶん(=1周ぶん)だけスライドさせる。
-    // 速度はCSS側の固定秒数ではなく枚数に比例させる(1枚あたり約7秒で
-    // 通り過ぎる、ゆっくり読める速さ)。固定秒数だと枚数が多い日ほど
-    // 逆に速く流れてしまい、コメントを読み切れなくなるため。
+    // 自動で流れ続けつつ、指でもドラッグしてスクロールできるようにする
+    // (renderHomeRows末尾のinitReviewFeedAutoScroll()参照)。シームレスに
+    // ループさせるため、カード列を2回連続で並べ、ちょうど半分ぶん
+    // (=1周ぶん)進んだらscrollLeftを巻き戻す。
+    // 速度は固定秒数ではなく枚数に比例させる(1枚あたり約7秒で通り過ぎる、
+    // ゆっくり読める速さ)。固定秒数だと枚数が多い日ほど逆に速く流れてしまい、
+    // コメントを読み切れなくなるため。
     const cardsHtml = reviewCards.join('');
     const marqueeSeconds = Math.max(60, reviewCards.length * 7);
     html += `
       <div class="section-label">みんなの声</div>
-      <div class="review-feed-marquee">
-        <div class="review-feed-track" style="animation-duration:${marqueeSeconds}s;">${cardsHtml}${cardsHtml}</div>
+      <div class="review-feed-marquee" id="review-feed-marquee">
+        <div class="review-feed-track" id="review-feed-track" data-loop-seconds="${marqueeSeconds}">${cardsHtml}${cardsHtml}</div>
       </div>
     `;
   }
 
   root.innerHTML = html;
+  initReviewFeedAutoScroll();
+}
+
+// 「みんなの声」は自動で流れ続けつつ、指でドラッグ/スワイプして自分でも
+// スクロールできるようにする。CSSのtransformアニメーションだと、ユーザーが
+// ネイティブスクロール(scrollLeft)で動かした位置と競合してカクつくため、
+// 自動スクロールもrequestAnimationFrameでscrollLeftを直接動かす方式に統一する。
+// 中身はカード列を2回連続で並べてあるので、半分ぶん進んだらscrollLeftを
+// 巻き戻してシームレスにループさせる(ユーザー操作で進んだ場合も同様に巻き戻す)。
+//
+// 注意: この関数はrenderHomeRows()の中、つまりまだswitchView('view-home')で
+// この画面が表示される前に呼ばれる。他の画面から戻ってきた直後は#view-homeが
+// まだdisplay:noneのことがあり、その状態でtrack.scrollWidthを読むと0になって
+// しまう(display:noneの要素はレイアウトされないため)。一度だけ測って使い回すと、
+// そのままずっと「幅0だから動いているように見えて全く動かない」状態が固定化するため、
+// 毎フレーム測り直す(カード列程度の要素数ならscrollWidthの読み取りコストは無視できる)。
+let reviewFeedRAF = null;
+function initReviewFeedAutoScroll(){
+  if(reviewFeedRAF){ cancelAnimationFrame(reviewFeedRAF); reviewFeedRAF = null; }
+
+  const marquee = document.getElementById('review-feed-marquee');
+  const track = document.getElementById('review-feed-track');
+  if(!marquee || !track) return;
+
+  const loopSeconds = Math.max(1, parseFloat(track.dataset.loopSeconds) || 90);
+
+  let paused = false;
+  let resumeTimer = null;
+  const pause = () => { paused = true; clearTimeout(resumeTimer); };
+  const resumeSoon = () => { clearTimeout(resumeTimer); resumeTimer = setTimeout(() => { paused = false; }, 2500); };
+  marquee.addEventListener('pointerdown', pause);
+  marquee.addEventListener('pointerup', resumeSoon);
+  marquee.addEventListener('pointercancel', resumeSoon);
+  marquee.addEventListener('wheel', () => { pause(); resumeSoon(); }, { passive: true });
+
+  // 自動スクロールでもユーザー操作でも、ループ端をまたいだら同じ場所へ巻き戻す
+  marquee.addEventListener('scroll', () => {
+    const loopWidth = track.scrollWidth / 2;
+    if(loopWidth <= 0) return;
+    if(marquee.scrollLeft >= loopWidth) marquee.scrollLeft -= loopWidth;
+    else if(marquee.scrollLeft < 0) marquee.scrollLeft += loopWidth;
+  });
+
+  let last = null;
+  function step(ts){
+    if(last === null) last = ts;
+    const dt = (ts - last) / 1000;
+    last = ts;
+    const loopWidth = track.scrollWidth / 2; // 2セット分並べてあるうちの1セットぶん
+    if(!paused && loopWidth > 0) marquee.scrollLeft += (loopWidth / loopSeconds) * dt;
+    reviewFeedRAF = requestAnimationFrame(step);
+  }
+  reviewFeedRAF = requestAnimationFrame(step);
 }
 
 let featuredIndex = 0;
@@ -5623,6 +5727,7 @@ function buildViewingRecordEntries(){
       date: row.created_at,
       onClick: `goDetail(${m.id})`,
       poster: m.posterColor,
+      posterUrl: m.posterUrl,
       initial: m.title.charAt(0),
       title: m.title,
       sub: `${m.year}年 ・ ${loveDisplayValue(m).toFixed(1)}の愛度`
@@ -5637,6 +5742,7 @@ function buildViewingRecordEntries(){
       date: row.createdAt,
       onClick: `goDetail(${m.id})`,
       poster: m.posterColor,
+      posterUrl: m.posterUrl,
       initial: m.title.charAt(0),
       title: m.title,
       sub: row.body
@@ -5660,11 +5766,17 @@ function buildViewingRecordEntries(){
   return entries;
 }
 
+// e.posterUrl(カタログ上の実ポスター画像)がある場合はそのまま使い、
+// 無い場合(個人の視聴ログなど、カタログに紐づかない記録)だけ、
+// 色ブロック+頭文字にフォールバックする(buildCardHTMLと同じ考え方)。
 function renderHistoryItemHTML(e){
   const dateLabel = e.date ? new Date(e.date).toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }) : '';
+  const posterInner = e.posterUrl
+    ? `<img src="${e.posterUrl}" alt="" loading="lazy" decoding="async">`
+    : escapeHtml(e.initial);
   return `
     <div class="history-item" onclick="${e.onClick}">
-      <div class="h-poster" style="background:${e.poster}">${escapeHtml(e.initial)}</div>
+      <div class="h-poster" style="background:${e.poster}">${posterInner}</div>
       <div style="min-width:0;">
         <div class="h-title">${escapeHtml(e.title)}</div>
         <div class="h-sub">${dateLabel ? dateLabel + ' ・ ' : ''}${escapeHtml(e.sub || '')}</div>
@@ -5674,19 +5786,18 @@ function renderHistoryItemHTML(e){
 }
 
 function renderRecordTileHTML(e){
+  const posterImg = e.posterUrl ? `<img src="${e.posterUrl}" alt="" loading="lazy" decoding="async">` : '';
+  const initialOrNothing = e.posterUrl ? '' : `<span class="poster-thumb-initial">${escapeHtml(e.initial)}</span>`;
   return `
     <div class="result-card" onclick="${e.onClick}">
-      <div class="poster-thumb" style="background:${e.poster}">
-        <span class="poster-thumb-initial">${escapeHtml(e.initial)}</span>
-        <div class="poster-thumb-title">${escapeHtml(e.title)}</div>
-      </div>
+      <div class="poster-thumb" style="background:${e.poster}">${posterImg}${initialOrNothing}<div class="poster-thumb-title">${escapeHtml(e.title)}</div></div>
     </div>
   `;
 }
 
 // プロフィール上では直近だけを短く縦積みで見せ、増えた分は「もっと見る」から
-// スクラップブック風のポスター格子(全件・最新順)で一覧できるようにする。
-const VIEWING_RECORD_PREVIEW_COUNT = 5;
+// 専用ページ(スクラップブック風のポスター格子、全件・最新順)に移動して見せる。
+const VIEWING_RECORD_PREVIEW_COUNT = 3;
 
 function renderViewingRecord(){
   const root = document.getElementById('viewing-record-list');
@@ -5712,20 +5823,10 @@ function renderViewingRecord(){
   }
 }
 
-function openViewingRecordModal(){
+function goViewingRecordAll(){
   const entries = buildViewingRecordEntries();
   document.getElementById('viewing-record-grid').innerHTML = entries.map(renderRecordTileHTML).join('');
-  const overlay = document.getElementById('viewing-record-overlay');
-  const drawer = document.getElementById('viewing-record-drawer');
-  overlay.style.display = 'flex';
-  drawer.classList.remove('closing');
-}
-
-function closeViewingRecordModal(){
-  const overlay = document.getElementById('viewing-record-overlay');
-  const drawer = document.getElementById('viewing-record-drawer');
-  drawer.classList.add('closing');
-  setTimeout(() => { overlay.style.display = 'none'; }, 280);
+  switchView('view-viewing-record');
 }
 
 function goMyLogForm(logId){
@@ -6059,10 +6160,19 @@ function renderListsGrid(targetId){
       const pos = positions[i];
       return `<div class="list-card-blob" style="top:${pos.top}; left:${pos.left}; width:${pos.size}; height:${pos.size}; background:${c};"></div>`;
     }).join('');
+    // 「あとで観る」等の組み込みリストには公開/非公開の概念自体が無いため、
+    // それ以外の自分で作ったリストだけにバッジを出す。以前は一覧では
+    // どれが公開中か全く分からず、開いてみないと分からなかった。
+    const badge = list.isBuiltIn ? '' : `
+      <div class="list-card-badge ${list.isPublic ? 'public' : 'private'}">
+        ${list.isPublic ? '公開中' : '非公開'}
+      </div>
+    `;
     return `
       <div class="list-card" onclick="goListDetail('${list.id}')">
         <div class="list-card-blobs">${blobs}</div>
         <div class="poster-grain"></div>
+        ${badge}
         <div class="list-card-name">${list.name}</div>
         <div class="list-card-count">${movies.length}本</div>
       </div>
@@ -6743,6 +6853,50 @@ function toggleDiagnosisPick(id){
   renderDiagnosisPicker();
 }
 
+// 診断の「シネマ・タイプ」カード。ランクや段階の概念を一切持たず、10個の
+// 感情タグの色×二つ名(THEME_NAME)をそのまま使う(占い・性格診断寄りの
+// 水平な分類。優劣は無い)。同じ関数を、新しく出た結果にも過去の記録にも使う。
+let currentDiagnosisShareState = null;
+
+function applyDiagnosisShareCard(cardId, topTag, movieTitles){
+  const card = document.getElementById(cardId);
+  if(!card) return;
+  const color = tagColor(topTag);
+  card.style.background = `linear-gradient(155deg, ${color}dd 0%, ${color} 55%, ${color}bb 100%)`;
+  card.querySelector('.diagnosis-share-title').textContent = THEME_NAME[topTag] || 'まだ名前のない物語';
+  card.querySelector('.diagnosis-share-blurb').textContent = SENSE_LIGHT[topTag] || '';
+  const moviesEl = card.querySelector('.diagnosis-share-movies');
+  if(moviesEl){
+    moviesEl.innerHTML = (movieTitles || []).slice(0, 5)
+      .map(t => `<span class="diagnosis-share-movie-chip">${t}</span>`).join('');
+  }
+}
+
+// Web Share API(スマホでよくある共有シート)が使えればそれを使い、
+// 使えない環境(主にPCブラウザ)ではクリップボードへのコピーにフォールバックする。
+async function shareDiagnosisCard(){
+  if(!currentDiagnosisShareState) return;
+  const { topTag } = currentDiagnosisShareState;
+  const themeName = THEME_NAME[topTag] || 'まだ名前のない物語';
+  const shareText = `私のシネマ・タイプは『${themeName}』でした。\n${window.location.origin}${window.location.pathname}`;
+
+  if(navigator.share){
+    try{
+      await navigator.share({ text: shareText });
+    }catch(err){
+      // ユーザーがシェアシートをキャンセルしただけの場合もここに来るので、
+      // エラー扱いにはせず静かに終わる。
+    }
+    return;
+  }
+  try{
+    await navigator.clipboard.writeText(shareText);
+    showToast('コピーしました。好きな場所に貼り付けてシェアしてね');
+  }catch(err){
+    showToast('コピーに失敗しました');
+  }
+}
+
 async function runNewDiagnosis(){
   if(!requireVerifiedUser()) return;
   if(diagnosisSelection.length !== DIAGNOSIS_MAX_PICK) return;
@@ -6750,7 +6904,8 @@ async function runNewDiagnosis(){
   const selectedMovies = diagnosisSelection.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
   const diagnosis = generateDiagnosis(selectedMovies);
 
-  document.getElementById('new-diagnosis-name').textContent = diagnosis.name;
+  applyDiagnosisShareCard('diagnosis-share-card', diagnosis.topTag, selectedMovies.map(m => m.title));
+  currentDiagnosisShareState = { name: diagnosis.name, topTag: diagnosis.topTag };
   document.getElementById('new-diagnosis-text').textContent = diagnosis.body;
 
   const moviesEl = document.getElementById('new-diagnosis-movies');
