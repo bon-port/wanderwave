@@ -760,6 +760,10 @@
     width: calc(100% + 40px);
     margin-left: -20px; margin-right: -20px;
     aspect-ratio: 16 / 9;
+    /* .appの幅はPCの広い画面で900px→1100pxへと広がる(下のメディアクエリ参照)。
+       16:9のままだと、その分だけバナーがどんどん縦にも巨大化してしまうため、
+       高さには上限を付けて頭打ちにする(幅だけが伸び、より横長になる)。 */
+    max-height: 300px;
     border-radius: 0;
     background: linear-gradient(160deg, #05080f, #0e1d33);
     position: relative;
@@ -822,13 +826,15 @@
   /* 背景は雰囲気を伝える色のぼかしのままにしつつ、その上に実物の
      ポスターを本来の縦横比(2:3)を保ったまま1枚だけ乗せる。
      ワイドな16:9の帯に引き伸ばして敷き詰めたりはしない。
-     横幅を画面幅の%で決めるとバナーの高さ(16:9)を超えてはみ出し、
-     overflow:hiddenで上端が欠けてしまう。上下を14pxずつ空けて高さを
-     先に決め、幅はaspect-ratioから自動算出させることで、どんな画面幅でも
-     バナーからはみ出さない最大サイズまで大きく表示する。 */
+     .appの幅は画面が広いほど900px→1100pxへ増えるが、幅の%だけでポスターの
+     大きさを決めると、その分だけポスターも(そしてタイトル文字とのバランスも
+     崩れるほど)際限なく巨大化してしまう。min()で「画面幅の30%」と
+     「150pxの絶対上限」の小さい方を採用し、どんなに画面が広がっても
+     ポスターは頭打ちにする(タイトルの文字サイズも固定pxのままなので、
+     これで両者の比率が画面サイズによらず揃う)。 */
   .poster-artwork{
-    position: absolute; left: 16px; top: 14px; bottom: 14px;
-    width: auto;
+    position: absolute; left: 16px; bottom: 14px;
+    width: min(30%, 150px);
     aspect-ratio: 2 / 3;
     border-radius: 10px;
     overflow: hidden;
@@ -841,11 +847,9 @@
   .poster-motif{
     position: absolute; inset: 0;
     display:flex; align-items:flex-end; justify-content:flex-end;
-    /* 左に実物のポスター(.poster-artwork)を敷いている。その幅はこの
-       要素自身の高さ(=バナーの高さ、幅の16:9)から2:3で決まるので、
-       幅に対してほぼ比例する(約37.5%)。固定pxではなく%基準の余白に
-       することで、画面幅が変わってもポスターとタイトルが被らないようにする。 */
-    padding: 0 16px 14px calc(37.5% + 15px);
+    /* 左の.poster-artworkの幅はmin(30%, 150px)。同じ上限を持つ式で
+       左余白を確保し、画面幅にかかわらずタイトルと被らないようにする。 */
+    padding: 0 16px 14px min(calc(30% + 30px), 190px);
   }
   .poster-motif::before{
     content: "";
@@ -1662,6 +1666,13 @@
   .pocket-grid{
     display:grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
     gap: 10px;
+  }
+  /* 視聴記録の「もっと見る」一覧は、タイトルを重ねた縦長タイルが並ぶだけの
+     ページなので、110px幅3列だとスマホ実機ではギチギチに詰まって見える。
+     もう少し幅を広げて2列にし、余白も増やす。 */
+  #viewing-record-grid.pocket-grid{
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 14px;
   }
   .pocket-grid .result-card{
     flex: none; width: 100%;
