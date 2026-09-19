@@ -397,6 +397,14 @@
     .search-results-grid .interest-pct{ font-size: 11px; }
     .search-results-grid .interest-count{ display:none; }
   }
+  .results-more-btn{
+    width:100%;
+    background:none; border:1px dashed var(--line);
+    border-radius:14px; padding:12px 16px; margin-top: 6px;
+    color:var(--ink-soft); font-size:13.5px;
+    cursor:pointer; font-family:inherit; text-align:center;
+  }
+  .results-more-btn:active{ transform: scale(0.99); }
   .results-pagination{
     display:flex; align-items:center; justify-content:space-between;
     gap: 10px; margin-top: 16px;
@@ -4182,15 +4190,14 @@ function matchesVibeAlias(m, normalizedQuery){
 //  JS処理なので、ここで重くなるのは専らDOM描画の枚数)
 // 以前は「前へ/次へ」ボタンでページを切り替える方式だったが、押すたびに
 // 画面がガクッと切り替わり、スクロール位置も先頭に戻ってしまっていた。
-// その前は「もっと見る」ボタンで継ぎ足す方式で、それはそれで押すたびに
-// ボタン自体が下へ下へ追いやられる問題があった。どちらもユーザーの
-// スクロール操作を遮る割り込みだったため、IntersectionObserverで
-// 下端に近づいたら自動で継ぎ足す方式にする。ボタンも「戻る」もなく、
-// スクロール(スライド)しているだけで途切れなく増えていく。
+// 次にIntersectionObserverで下端に近づいたら自動で継ぎ足す方式にしたが、
+// 今度はスクロールし続けるだけで一覧が際限なく長くなり、使いづらいという
+// フィードバックを受けた。押した時だけ次の分を継ぎ足す「もっと見る」
+// ボタンに戻す(ボタンが下へ追いやられる問題はあるが、無限に伸びる一覧
+// よりは自分でページ送りしている感覚を持てる方を優先する)。
 const RESULTS_PAGE_SIZE = 30;
 let resultsFiltered = [];
 let resultsShownCount = RESULTS_PAGE_SIZE;
-let resultsSentinelObserver = null;
 
 function renderResults(){
   const root = document.getElementById('results');
@@ -4251,23 +4258,18 @@ function renderVisibleResults(){
   const visible = resultsFiltered.slice(0, resultsShownCount);
   renderMovieCards(root, visible, '条件に合う映画が見つかりませんでした。タグを減らすか、表現度の絞り込みを外してみましょう。');
 
-  if(resultsSentinelObserver){ resultsSentinelObserver.disconnect(); resultsSentinelObserver = null; }
   const remaining = resultsFiltered.length - visible.length;
   if(remaining <= 0) return;
 
-  // 一覧の末尾に見えない番人要素を置き、それが画面に近づいたら(rootMarginで
-  // 手前から先読み)自動で次のRESULTS_PAGE_SIZE件を継ぎ足す。ボタンを押す
-  // 操作を挟まず、スクロールし続けているだけで自然に増えていくようにする。
-  root.insertAdjacentHTML('beforeend', '<div id="results-sentinel" style="grid-column:1/-1;"></div>');
-  const sentinel = document.getElementById('results-sentinel');
-  resultsSentinelObserver = new IntersectionObserver((entries) => {
-    if(!entries[0].isIntersecting) return;
-    resultsSentinelObserver.disconnect();
-    resultsSentinelObserver = null;
-    resultsShownCount += RESULTS_PAGE_SIZE;
-    renderVisibleResults();
-  }, { rootMargin: '600px 0px' });
-  resultsSentinelObserver.observe(sentinel);
+  // スクロールするだけで際限なく増えていく形だと一覧が縦に長くなりすぎて
+  // 使いづらい、というフィードバックを受け、自動追加(IntersectionObserver)
+  // をやめてボタンでの手動読み込みに戻した。押した時だけ次のページ分を継ぎ足す。
+  root.insertAdjacentHTML('beforeend', `<button class="results-more-btn" style="grid-column:1/-1;" onclick="loadMoreResults()">もっと見る(残り${remaining}件)</button>`);
+}
+
+function loadMoreResults(){
+  resultsShownCount += RESULTS_PAGE_SIZE;
+  renderVisibleResults();
 }
 
 // シリーズの棚が長すぎると横スクロールが延々続いて使いにくいので、
