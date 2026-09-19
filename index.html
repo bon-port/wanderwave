@@ -821,10 +821,14 @@
   }
   /* 背景は雰囲気を伝える色のぼかしのままにしつつ、その上に実物の
      ポスターを本来の縦横比(2:3)を保ったまま1枚だけ乗せる。
-     ワイドな16:9の帯に引き伸ばして敷き詰めたりはしない。 */
+     ワイドな16:9の帯に引き伸ばして敷き詰めたりはしない。
+     横幅を画面幅の%で決めるとバナーの高さ(16:9)を超えてはみ出し、
+     overflow:hiddenで上端が欠けてしまう。上下を14pxずつ空けて高さを
+     先に決め、幅はaspect-ratioから自動算出させることで、どんな画面幅でも
+     バナーからはみ出さない最大サイズまで大きく表示する。 */
   .poster-artwork{
-    position: absolute; left: 16px; bottom: 14px;
-    width: 34%; max-width: 130px;
+    position: absolute; left: 16px; top: 14px; bottom: 14px;
+    width: auto;
     aspect-ratio: 2 / 3;
     border-radius: 10px;
     overflow: hidden;
@@ -837,9 +841,11 @@
   .poster-motif{
     position: absolute; inset: 0;
     display:flex; align-items:flex-end; justify-content:flex-end;
-    /* 左下に実物のポスター(.poster-artwork、最大130px幅)を敷いているので、
-       タイトルの折り返し幅がそこへ被らないよう左側に空けておく */
-    padding: 0 16px 14px 150px;
+    /* 左に実物のポスター(.poster-artwork)を敷いている。その幅はこの
+       要素自身の高さ(=バナーの高さ、幅の16:9)から2:3で決まるので、
+       幅に対してほぼ比例する(約37.5%)。固定pxではなく%基準の余白に
+       することで、画面幅が変わってもポスターとタイトルが被らないようにする。 */
+    padding: 0 16px 14px calc(37.5% + 15px);
   }
   .poster-motif::before{
     content: "";
