@@ -1874,41 +1874,49 @@
   }
   .diagnosis-share-btn:active{ transform: scale(0.97); }
   /* 今日の贈り物(UI名称)。内部のクラス/関数名は開発時の名残でomikuji-のまま
-     だが、表示上は「今日の贈り物」。一覧で選ばせる「おすすめ」カード列ではなく、
-     静かに1本だけ差し出すカードのような見た目にする(左端に細い
-     アクセント線、派手なアニメーションやバッジは付けない)。 */
+     だが、表示上は「きょうの贈り物。」。閉じている間は光の玉が静かに呼吸する
+     ように光り、タップすると星屑になって弾けて贈り物が現れる(下書きを
+     ユーザーに見せて選んでもらったデザイン)。 */
   .omikuji-card{
     margin-top: 16px;
-    border: 1px solid var(--line); border-radius: 12px;
-    padding: 14px 16px 14px 18px; cursor: pointer;
-    background: var(--surface);
-    position: relative; overflow: hidden;
+    border: 1px solid var(--line); border-radius: 18px;
+    padding: 26px 20px 22px; cursor: pointer;
+    background: radial-gradient(ellipse at 50% 0%, rgba(160,132,242,.14) 0%, transparent 70%), var(--surface);
+    position: relative; overflow: hidden; text-align: center;
   }
   .omikuji-card:active{ transform: scale(0.99); }
-  .omikuji-card::before{
-    content:''; position:absolute; left:0; top:0; bottom:0; width:3px;
-    background: linear-gradient(180deg, var(--gold), var(--love));
-  }
   .omikuji-label{
-    font-size: 11px; color: var(--gold); font-weight:600; letter-spacing:.04em;
-    margin-bottom: 10px;
+    font-size: 11px; color: var(--gold); font-weight:600; letter-spacing:.06em;
+    margin-bottom: 16px;
   }
-  .omikuji-closed{ padding: 6px 0 8px; text-align:center; }
+  .omikuji-closed{ padding: 0; }
+  .omikuji-orb-wrap{ position:relative; width:64px; height:64px; margin:0 auto 14px; }
+  .omikuji-orb{
+    width:100%; height:100%; border-radius:50%;
+    background: radial-gradient(circle at 35% 30%, #fdf8f0 0%, var(--gold) 40%, var(--love) 100%);
+    animation: giftOrbBreathe 2.6s ease-in-out infinite;
+    box-shadow: 0 0 24px -2px rgba(160,132,242,.55);
+  }
+  @keyframes giftOrbBreathe{
+    0%,100%{ transform: scale(1); opacity:.92; }
+    50%{ transform: scale(1.08); opacity:1; }
+  }
   .omikuji-closed-text{ font-size: 13px; color: var(--ink-soft); }
-  .omikuji-body{ display:flex; gap:12px; align-items:center; }
+  .omikuji-body{ display:flex; gap:14px; align-items:center; text-align:left; }
   /* 開けた瞬間だけは「楽しく」感じてもらいたいので、他の静かなreveal演出より
      少し弾む(オーバーシュートする)動きにする。 */
-  .omikuji-body.reveal{ animation: giftReveal 0.5s cubic-bezier(.34,1.56,.64,1) forwards; }
+  .omikuji-body.reveal{ animation: giftReveal 0.55s cubic-bezier(.34,1.56,.64,1) forwards; }
   @keyframes giftReveal{
     0%{ opacity: 0; transform: scale(0.85) translateY(6px); }
     60%{ opacity: 1; transform: scale(1.04) translateY(-2px); }
     100%{ opacity: 1; transform: scale(1) translateY(0); }
   }
   .omikuji-poster{
-    width: 48px; height: 68px; border-radius:6px; flex-shrink:0;
+    width: 56px; height: 80px; border-radius:8px; flex-shrink:0;
     position:relative; overflow:hidden;
     display:flex; align-items:center; justify-content:center;
     font-family:'M PLUS Rounded 1c', sans-serif; font-weight:700; color:rgba(255,255,255,.85);
+    box-shadow: 0 6px 18px -4px rgba(0,0,0,.5);
   }
   .omikuji-poster img{ position:absolute; inset:0; width:100%; height:100%; object-fit:cover; }
   .omikuji-text{ min-width: 0; }
@@ -1917,6 +1925,10 @@
     margin-bottom:4px; line-height:1.35;
   }
   .omikuji-line{ font-size:12px; color:var(--ink-soft); line-height:1.5; }
+  /* タップした瞬間だけ玉の周りに星屑を弾けさせる、使い捨ての演出用要素 */
+  .omikuji-spark{
+    position:absolute; left:50%; top:38%; pointer-events:none;
+  }
 
   /* ---- reconsider modal ---- */
   .modal-overlay{
@@ -2477,9 +2489,10 @@
            本物のおみくじと同じく、開くのはユーザー自身のタップから
            (表示された瞬間に結果を見せてしまわない)。 -->
       <div id="omikuji-card" class="omikuji-card" style="display:none;" onclick="onOmikujiCardClick()">
-        <div class="omikuji-label">きょうの贈り物</div>
+        <div class="omikuji-label">きょうの贈り物。</div>
         <div class="omikuji-closed" id="omikuji-closed">
-          <div class="omikuji-closed-text">タップして、きょうの贈り物を開ける</div>
+          <div class="omikuji-orb-wrap" id="omikuji-orb-wrap"><div class="omikuji-orb"></div></div>
+          <div class="omikuji-closed-text">タップして、開けてみる</div>
         </div>
         <div class="omikuji-body" id="omikuji-body" style="display:none;">
           <div class="omikuji-poster" id="omikuji-poster"></div>
@@ -3397,6 +3410,32 @@ function feedbackGiftOpen(){
   playSweep(300, 900, 0.18, 0.11);
   setTimeout(() => playTone(1047, 0.14, 0.07), 90);
   if(navigator.vibrate) navigator.vibrate([12, 24, 18]);
+}
+
+// スプラッシュ画面の星と同じ形(spark-star)を使い、開けた瞬間だけ光の玉が
+// 星屑になって弾けるような演出にする。使い捨てのDOM要素なのでアニメーション
+// 終了後に自分で取り除く。
+const GIFT_STAR_PATH = "M12 0 L14 10 L24 12 L14 14 L12 24 L10 14 L0 12 L10 10 Z";
+function burstGiftSparks(container, count){
+  for(let i = 0; i < count; i++){
+    const angle = (Math.PI * 2 * i / count) + (Math.random() * 0.4 - 0.2);
+    const dist = 46 + Math.random() * 22;
+    const dx = Math.cos(angle) * dist;
+    const dy = Math.sin(angle) * dist - 10;
+    const size = 8 + Math.random() * 8;
+    const el = document.createElement('div');
+    el.className = 'omikuji-spark';
+    el.style.width = size + 'px';
+    el.style.height = size + 'px';
+    el.innerHTML = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d="${GIFT_STAR_PATH}" fill="${i % 2 === 0 ? 'var(--gold)' : 'var(--love)'}"/></svg>`;
+    el.animate([
+      { transform: 'translate(-50%,-50%) translate(0,0) scale(0.3) rotate(0deg)', opacity: 0 },
+      { transform: `translate(-50%,-50%) translate(${dx * 0.4}px,${dy * 0.4}px) scale(1) rotate(90deg)`, opacity: 1, offset: 0.35 },
+      { transform: `translate(-50%,-50%) translate(${dx}px,${dy}px) scale(0.4) rotate(200deg)`, opacity: 0 }
+    ], { duration: 900, easing: 'cubic-bezier(.2,.7,.3,1)' });
+    container.appendChild(el);
+    setTimeout(() => el.remove(), 950);
+  }
 }
 
 function loveAverage(m){
@@ -6668,6 +6707,7 @@ function renderOmikujiCard(movieId){
   if(!m){ card.style.display = 'none'; return; }
 
   document.getElementById('omikuji-closed').style.display = 'block';
+  document.getElementById('omikuji-orb-wrap').style.display = '';
   const bodyEl = document.getElementById('omikuji-body');
   bodyEl.style.display = 'none';
   bodyEl.classList.remove('reveal');
@@ -6685,6 +6725,7 @@ function onOmikujiCardClick(){
   if(omikujiPendingMovieId == null) return;
   if(!omikujiOpened){
     omikujiOpened = true;
+    burstGiftSparks(document.getElementById('omikuji-card'), 7);
     document.getElementById('omikuji-closed').style.display = 'none';
     const bodyEl = document.getElementById('omikuji-body');
     bodyEl.style.display = 'flex';
