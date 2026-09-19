@@ -1102,6 +1102,30 @@
   }
   textarea:focus, .field-input:focus{ border-color: var(--plum); }
 
+  /* 視聴ログのタイトル入力欄。カタログに一致する作品があれば候補を出し、
+     選んでもらうことで表記ゆれ・重複を防ぎ、実ポスターも出せるようにする
+     (選ばなければ今まで通り自由入力のまま記録できる)。 */
+  .autocomplete-wrap{ position: relative; }
+  .autocomplete-list{
+    position: absolute; left:0; right:0; top: calc(100% + 4px);
+    background: var(--surface); border:1px solid var(--line); border-radius:10px;
+    max-height: 240px; overflow-y: auto; z-index: 20;
+    box-shadow: 0 12px 28px -8px rgba(0,0,0,0.5);
+  }
+  .autocomplete-item{
+    display:flex; align-items:center; gap:10px;
+    padding: 9px 12px; cursor:pointer; font-size:13.5px; color:var(--ink);
+  }
+  .autocomplete-item:active, .autocomplete-item:hover{ background: rgba(255,255,255,0.06); }
+  .autocomplete-item + .autocomplete-item{ border-top: 1px solid var(--line); }
+  .autocomplete-item-poster{
+    width:26px; height:37px; border-radius:4px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center;
+    font-size:11px; font-weight:700; color:rgba(255,255,255,0.85);
+    background-size: cover; background-position: center;
+  }
+  .autocomplete-item-year{ color: var(--ink-soft); font-size:11.5px; }
+
   .primary-btn{
     background: transparent; color: var(--gold); border: 1px solid var(--gold);
     border-radius: 10px; padding: 12px 20px;
@@ -2336,7 +2360,12 @@
     <div class="form-grid">
       <div class="field">
         <label>映画のタイトル</label>
-        <input class="field-input" id="ml-title" placeholder="映画のタイトル">
+        <div class="autocomplete-wrap">
+          <input class="field-input" id="ml-title" placeholder="映画のタイトル" autocomplete="off"
+            oninput="onMlTitleInput()" onblur="hideMlTitleSuggestionsSoon()">
+          <div id="ml-title-suggestions" class="autocomplete-list" style="display:none;"></div>
+        </div>
+        <div class="sub" id="ml-title-linked-note" style="display:none; margin-top:6px;">✓ カタログの作品と紐付きました(ポスターが表示されます)</div>
       </div>
 
       <div class="field">
@@ -5772,6 +5801,50 @@ let mlEditingId = null;
 let mlLoveLevel = 0;
 let mlSelectedTags = new Set();
 let mlSelectedReasons = new Set();
+// カタログの作品と紐付いている場合だけmovie_idが入る(表記ゆれ防止・実ポスター
+// 表示のため)。入力欄を自由に打ち直すと未確定に戻り、候補を選び直すまでnullのまま
+// (=これまで通りの自由入力の記録として保存される)。
+let mlSelectedMovieId = null;
+
+function onMlTitleInput(){
+  mlSelectedMovieId = null;
+  document.getElementById('ml-title-linked-note').style.display = 'none';
+  const q = normalizeForSearch(document.getElementById('ml-title').value.trim());
+  const listEl = document.getElementById('ml-title-suggestions');
+  if(!q){ listEl.style.display = 'none'; listEl.innerHTML = ''; return; }
+
+  const matches = MOVIES.filter(m => normalizeForSearch(m.title).includes(q)).slice(0, 6);
+  if(!matches.length){ listEl.style.display = 'none'; listEl.innerHTML = ''; return; }
+
+  listEl.innerHTML = matches.map(m => {
+    const posterStyle = m.posterUrl
+      ? `background-image:url('${m.posterUrl}'); background-color:${m.posterColor};`
+      : `background:${m.posterColor};`;
+    return `
+      <div class="autocomplete-item" onmousedown="selectMlTitleSuggestion(${m.id})">
+        <div class="autocomplete-item-poster" style="${posterStyle}">${m.posterUrl ? '' : m.title.charAt(0)}</div>
+        <div style="min-width:0; flex:1;">${m.title}</div>
+        <div class="autocomplete-item-year">${m.year}</div>
+      </div>
+    `;
+  }).join('');
+  listEl.style.display = 'block';
+}
+
+function selectMlTitleSuggestion(movieId){
+  const m = MOVIES.find(x => x.id === movieId);
+  if(!m) return;
+  mlSelectedMovieId = m.id;
+  document.getElementById('ml-title').value = unescapeHtml(m.title);
+  document.getElementById('ml-title-suggestions').style.display = 'none';
+  document.getElementById('ml-title-linked-note').style.display = 'block';
+}
+
+// blur自体はクリックより先に発火するので、候補クリックのonmousedownが
+// 反応できるよう少し遅らせてから閉じる。
+function hideMlTitleSuggestionsSoon(){
+  setTimeout(() => { document.getElementById('ml-title-suggestions').style.display = 'none'; }, 150);
+}
 
 async function loadMyLogs(){
   try{
@@ -5831,11 +5904,15 @@ function buildViewingRecordEntries(){
 
   state.myLogs.forEach(log => {
     const firstTag = (log.tags || '').split(',').filter(Boolean)[0];
+    // カタログの作品と紐付いている(movie_id)なら、その実ポスターを使う。
+    // 紐付いていない自由入力の記録は、今まで通りタグの色+頭文字で表示する。
+    const linked = log.movie_id != null ? MOVIES.find(x => x.id === log.movie_id) : null;
     entries.push({
       type: 'log',
       date: log.created_at,
       onClick: `goMyLogForm(${log.id})`,
-      poster: firstTag ? tagColor(firstTag) : '#3a3a40',
+      poster: linked ? linked.posterColor : (firstTag ? tagColor(firstTag) : '#3a3a40'),
+      posterUrl: linked ? linked.posterUrl : null,
       initial: (log.movie_title || '?').charAt(0),
       title: log.movie_title || '(無題)',
       sub: log.review_text || log.tags || '感想なし'
@@ -5915,9 +5992,12 @@ function goMyLogForm(logId){
   mlLoveLevel = log ? (log.love_level || 0) : 0;
   mlSelectedTags = new Set(log && log.tags ? log.tags.split(',').filter(Boolean) : []);
   mlSelectedReasons = new Set(log && log.reason_tags ? log.reason_tags : []);
+  mlSelectedMovieId = log ? (log.movie_id || null) : null;
 
   document.getElementById('mylog-heading').textContent = log ? '視聴ログを編集' : '視聴ログを書く';
   document.getElementById('ml-title').value = log ? log.movie_title : '';
+  document.getElementById('ml-title-suggestions').style.display = 'none';
+  document.getElementById('ml-title-linked-note').style.display = mlSelectedMovieId ? 'block' : 'none';
   document.getElementById('ml-review').value = log ? (log.review_text || '') : '';
   document.getElementById('ml-intensity-slider').value = log ? (log.expression_level != null ? log.expression_level : 0) : 0;
   document.getElementById('mylog-submit-btn').textContent = log ? '更新する' : '記録する';
@@ -6001,6 +6081,7 @@ async function saveMyLog(){
 
   const payload = {
     movie_title: title,
+    movie_id: mlSelectedMovieId,
     tags: [...mlSelectedTags].join(','),
     expression_level: parseInt(document.getElementById('ml-intensity-slider').value, 10),
     love_level: mlLoveLevel,
