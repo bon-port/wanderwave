@@ -295,7 +295,10 @@
   .filter-disclosure-body{
     max-height:0; overflow:hidden; transition:max-height .25s ease;
   }
-  .filter-disclosure-body.open{ max-height:400px; }
+  /* ジャンル(16件)+国(13件)のチップが折り返す分の高さが400pxでは
+     足りず、国の行が途中で切れていた。実際に必要な高さより十分大きい
+     値にしておく。 */
+  .filter-disclosure-body.open{ max-height:700px; }
   .filter-disclosure-inner{ padding-top:14px; }
   .filter-group{ margin-bottom:16px; }
   .filter-group:last-child{ margin-bottom:0; }
@@ -377,6 +380,22 @@
   .search-results-grid .poster-thumb{
     width: 88%;
     margin: 0 auto;
+  }
+  /* スマホでは検索結果が縦に長くなり過ぎて使いづらいという声を受けて、
+     検索一覧のカードだけ小さく・情報量を絞って密度を上げる
+     (他の画面のカード表示には影響させない)。 */
+  @media (max-width: 859px){
+    .search-results-grid{
+      grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+      gap: 10px 8px;
+    }
+    .search-results-grid .result-title{
+      font-size: 12.5px; margin-bottom: 1px;
+      display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden;
+    }
+    .search-results-grid .result-year{ font-size: 10.5px; margin-bottom: 4px; }
+    .search-results-grid .interest-pct{ font-size: 11px; }
+    .search-results-grid .interest-count{ display:none; }
   }
   .results-pagination{
     display:flex; align-items:center; justify-content:space-between;
