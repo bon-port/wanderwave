@@ -32,21 +32,79 @@ async function tmdbFetch(path: string, params: Record<string, string> = {}) {
 // 失敗時のフォールバックと自然に両立する)。当初は非公式のGoogle翻訳
 // エンドポイントを使っていたが、Supabase Edge Functionsの送信元IPからだと
 // 429(レート制限)で弾かれ続けたため、こちらの正式な無料APIに切り替えた。
-// 1リクエストあたり500文字程度が上限のため、それより長いレビューは訳す前に切り詰める。
-async function translateToJa(text: string): Promise<string> {
-  const trimmed = text.slice(0, 480);
+// 1リクエストあたり500文字程度が上限のため、長いレビューは複数チャンクに
+// 分けて翻訳し、繋ぎ合わせる(以前は480文字で単純に切り詰めていたため、
+// 翻訳結果が文の途中でぶつ切りになっていた)。
+const MAX_REVIEW_SOURCE_LEN = 1200;
+const TRANSLATE_CHUNK_LEN = 450;
+
+// 1200文字を超えるレビューはさすがに長すぎるので、文の区切り(. ! ?)が
+// 見つかればそこで、無ければ単純に切り詰める。
+function trimToSentenceBoundary(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  const cut = text.slice(0, maxLen);
+  const lastPunct = Math.max(cut.lastIndexOf(". "), cut.lastIndexOf("! "), cut.lastIndexOf("? "));
+  return lastPunct > maxLen * 0.5 ? cut.slice(0, lastPunct + 1) : cut;
+}
+
+// 単語の途中で切らないよう、単語単位でmaxLen以下のチャンクにまとめる。
+function splitIntoChunks(text: string, maxLen: number): string[] {
+  const words = text.split(/\s+/);
+  const chunks: string[] = [];
+  let current = "";
+  for (const word of words) {
+    const candidate = current ? `${current} ${word}` : word;
+    if (candidate.length > maxLen && current) {
+      chunks.push(current);
+      current = word;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) chunks.push(current);
+  return chunks;
+}
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 1レビューを複数チャンクに分けたことで、6件同時翻訳時のMyMemoryへの
+// 瞬間リクエスト数が増え、まれに素っ気ないレート制限で失敗する(原文の
+// 英語がそのまま返ってしまう)ことが確認された。1回だけ間を置いて
+// リトライすることで、この取りこぼしをほぼ無くす。
+async function translateChunkOnce(chunk: string): Promise<string | null> {
   try {
     const url = new URL("https://api.mymemory.translated.net/get");
-    url.searchParams.set("q", trimmed);
+    url.searchParams.set("q", chunk);
     url.searchParams.set("langpair", "en|ja");
     const res = await fetch(url.toString());
-    if (!res.ok) return trimmed;
+    if (!res.ok) return null;
     const data = await res.json();
     const translated = String(data?.responseData?.translatedText || "").trim();
-    return translated || trimmed;
+    return translated || null;
   } catch {
-    return trimmed;
+    return null;
   }
+}
+
+async function translateChunk(chunk: string): Promise<string> {
+  const first = await translateChunkOnce(chunk);
+  if (first) return first;
+  await sleep(700);
+  const retried = await translateChunkOnce(chunk);
+  return retried || chunk;
+}
+
+async function translateToJa(text: string): Promise<string> {
+  const bounded = trimToSentenceBoundary(text, MAX_REVIEW_SOURCE_LEN);
+  const chunks = splitIntoChunks(bounded, TRANSLATE_CHUNK_LEN);
+  const translated: string[] = [];
+  for (const chunk of chunks) {
+    translated.push(await translateChunk(chunk));
+    await sleep(120);
+  }
+  return translated.join("");
 }
 
 // TMDBは外部の匿名レビューなので、作品とは関係のない政治的な主張や扇動的な
@@ -140,8 +198,13 @@ Deno.serve(async (req: Request) => {
     // 翻訳リクエストが増えすぎないよう、表示する分だけ(最大6件)に絞る
     .slice(0, 6);
 
+  // レビューごとに開始タイミングを少しずらし、MyMemoryへの瞬間リクエスト数が
+  // 一気に跳ね上がらないようにする(バーストによるレート制限を避けるため)。
   const reviews = await Promise.all(
-    rawReviews.map(async (r: any) => ({ ...r, content: await translateToJa(r.content) })),
+    rawReviews.map(async (r: any, i: number) => {
+      await sleep(i * 180);
+      return { ...r, content: await translateToJa(r.content) };
+    }),
   );
 
   return json({ movie_id: movieId, tmdb_matched: true, tmdb_id: tmdbId, reviews });
