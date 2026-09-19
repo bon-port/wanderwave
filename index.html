@@ -6983,11 +6983,20 @@ function renderDiagnosisPicker(){
     runBtn.style.display = 'none';
     cooldownNote.style.display = 'block';
     cooldownNote.textContent = `5本での診断は1ヶ月に1回までです。あと${remainingDays}日で次の診断ができます。`;
+    // クールダウン中は次の診断ができない代わりに、直近の診断結果を
+    // 「過去の記憶を見る」を開かなくても見えるように出し続ける
+    // (以前はここでdiagnosis-resultに触れておらず、ページを開き直すと
+    // 結果ごと消えて見えていた)。
+    const latest = (state.diagnosisHistory || [])[0];
+    if(latest) applyDiagnosisResultDisplay(latest);
     return;
   }
   root.style.display = '';
   runBtn.style.display = '';
   cooldownNote.style.display = 'none';
+  // クールダウンが明けた後は、また新しく診断できる状態を主役にする
+  // (30日を過ぎた古い結果を出しっぱなしにはしない)。
+  document.getElementById('diagnosis-result').style.display = 'none';
 
   if(pocketMovies.length === 0){
     root.innerHTML = `<div class="empty" style="grid-column: 1 / -1;">ポケットに何か入れると、ここから選んで診断できます。</div>`;
@@ -7042,6 +7051,32 @@ function applyDiagnosisShareCard(cardId, topTag, movieTitles){
     moviesEl.innerHTML = (movieTitles || []).slice(0, 5)
       .map(t => `<span class="diagnosis-share-movie-chip">${t}</span>`).join('');
   }
+}
+
+// クールダウン中(次に診断できるまでの30日間)は新しい結果を作れない代わりに、
+// 直近の診断結果をこの関数で出し続ける(runNewDiagnosis()の表示ロジックと
+// 共通化)。おすすめ欄(new-diagnosis-rec)はその場で計算するものなので、
+// 過去の記録の再表示では省く。
+function applyDiagnosisResultDisplay(historyEntry){
+  const movies = (historyEntry.movieIds || []).map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
+
+  applyDiagnosisShareCard('diagnosis-share-card', historyEntry.topTag, movies.map(m => m.title));
+  currentDiagnosisShareState = { name: historyEntry.name, topTag: historyEntry.topTag };
+  document.getElementById('new-diagnosis-text').textContent = historyEntry.body;
+
+  document.getElementById('new-diagnosis-movies').innerHTML = movies.map(m => `
+    <div class="poster-thumb" style="background:${m.posterColor};" onclick="goDetail(${m.id})">
+      <div class="poster-thumb-title">${m.title}</div>
+    </div>
+  `).join('');
+
+  const recEl = document.getElementById('new-diagnosis-rec');
+  recEl.style.display = 'none';
+  recEl.innerHTML = '';
+
+  const resultEl = document.getElementById('diagnosis-result');
+  resultEl.style.display = 'block';
+  resultEl.classList.add('reveal');
 }
 
 // Web Share API(スマホでよくある共有シート)が使えればそれを使い、
