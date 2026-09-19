@@ -1855,7 +1855,14 @@
   .omikuji-closed{ padding: 6px 0 8px; text-align:center; }
   .omikuji-closed-text{ font-size: 13px; color: var(--ink-soft); }
   .omikuji-body{ display:flex; gap:12px; align-items:center; }
-  .omikuji-body.reveal{ animation: softReveal 0.6s cubic-bezier(.22,.8,.32,1) forwards; }
+  /* 開けた瞬間だけは「楽しく」感じてもらいたいので、他の静かなreveal演出より
+     少し弾む(オーバーシュートする)動きにする。 */
+  .omikuji-body.reveal{ animation: giftReveal 0.5s cubic-bezier(.34,1.56,.64,1) forwards; }
+  @keyframes giftReveal{
+    0%{ opacity: 0; transform: scale(0.85) translateY(6px); }
+    60%{ opacity: 1; transform: scale(1.04) translateY(-2px); }
+    100%{ opacity: 1; transform: scale(1) translateY(0); }
+  }
   .omikuji-poster{
     width: 48px; height: 68px; border-radius:6px; flex-shrink:0;
     position:relative; overflow:hidden;
@@ -2412,9 +2419,9 @@
            本物のおみくじと同じく、開くのはユーザー自身のタップから
            (表示された瞬間に結果を見せてしまわない)。 -->
       <div id="omikuji-card" class="omikuji-card" style="display:none;" onclick="onOmikujiCardClick()">
-        <div class="omikuji-label">今日の贈り物</div>
+        <div class="omikuji-label">きょうの贈り物</div>
         <div class="omikuji-closed" id="omikuji-closed">
-          <div class="omikuji-closed-text">タップして、今日の贈り物を開ける</div>
+          <div class="omikuji-closed-text">タップして、きょうの贈り物を開ける</div>
         </div>
         <div class="omikuji-body" id="omikuji-body" style="display:none;">
           <div class="omikuji-poster" id="omikuji-poster"></div>
@@ -3318,6 +3325,15 @@ function feedbackSuccess(){
   playTone(660, 0.1, 0.09);
   setTimeout(() => playTone(880, 0.16, 0.09), 90);
   if(navigator.vibrate) navigator.vibrate([10, 30, 10]);
+}
+
+// 「きょうの贈り物」を開けた瞬間だけの、少し弾んだ音(比較用に上で用意して
+// あったC_bubbleの泡っぽい音色を採用)。1日1回きりの特別な瞬間なので、
+// 他の操作音より気持ち華やかにしてある。
+function feedbackGiftOpen(){
+  playSweep(300, 900, 0.18, 0.11);
+  setTimeout(() => playTone(1047, 0.14, 0.07), 90);
+  if(navigator.vibrate) navigator.vibrate([12, 24, 18]);
 }
 
 function loveAverage(m){
@@ -6558,6 +6574,7 @@ function onOmikujiCardClick(){
     const bodyEl = document.getElementById('omikuji-body');
     bodyEl.style.display = 'flex';
     bodyEl.classList.add('reveal');
+    feedbackGiftOpen();
     return;
   }
   goDetailWithViewReturn(omikujiPendingMovieId, 'view-pocket', '← 診断に戻る');
