@@ -1720,6 +1720,18 @@
   .pocket-grid .poster-thumb{
     width: 100%; height: auto; aspect-ratio: 2/3;
   }
+  /* シリーズ一覧モーダルの中で、今見ている作品自身のタイルに付ける目印
+     (タップしても遷移しないので、カーソルも通常の矢印に戻しておく)。 */
+  .series-list-current{ cursor: default; }
+  .series-list-current .poster-thumb{
+    box-shadow: 0 0 0 2px var(--gold);
+  }
+  .series-list-current .poster-thumb-title::after{
+    content: '(今ここ)';
+    display: block;
+    font-size: 10px; font-weight: 600; color: var(--gold);
+    margin-top: 2px;
+  }
   .pocket-divider{
     height:1px; background: var(--line); margin: 26px 0;
   }
@@ -4144,7 +4156,20 @@ function renderRecommended(currentMovie){
 function openSeriesListModal(seriesName, movieIds, originId){
   document.getElementById('series-list-title').textContent = seriesName;
   const movies = movieIds.map(id => MOVIES.find(m => m.id === id)).filter(Boolean);
-  renderMovieCards(document.getElementById('series-list-items'), movies, '', { overlayTitle: true, returnTo: originId });
+  const itemsRoot = document.getElementById('series-list-items');
+  renderMovieCards(itemsRoot, movies, '', { overlayTitle: true, returnTo: originId });
+
+  // 一覧には今見ている作品自身も含めている(シリーズ全体の中でどこに
+  // 位置するか分かるようにするため)が、それをタップすると「自分自身に
+  // 戻る」という意味の無い遷移になり、戻るボタンの表示までおかしくなって
+  // いた。自分の分だけ目印を付け、タップではモーダルを閉じるだけにする。
+  [...itemsRoot.children].forEach((card, i) => {
+    if(movies[i] && movies[i].id === originId){
+      card.classList.add('series-list-current');
+      card.onclick = () => closeSeriesListModal();
+    }
+  });
+
   const overlay = document.getElementById('series-list-overlay');
   const drawer = document.getElementById('series-list-drawer');
   overlay.style.display = 'flex';
