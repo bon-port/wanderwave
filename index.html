@@ -1856,7 +1856,10 @@
     font-size: 11px; color: var(--gold); font-weight:600; letter-spacing:.04em;
     margin-bottom: 10px;
   }
+  .omikuji-closed{ padding: 6px 0 8px; text-align:center; }
+  .omikuji-closed-text{ font-size: 13px; color: var(--ink-soft); }
   .omikuji-body{ display:flex; gap:12px; align-items:center; }
+  .omikuji-body.reveal{ animation: softReveal 0.6s cubic-bezier(.22,.8,.32,1) forwards; }
   .omikuji-poster{
     width: 48px; height: 68px; border-radius:6px; flex-shrink:0;
     position:relative; overflow:hidden;
@@ -2410,10 +2413,15 @@
 
       <!-- 一覧で選ばせる「おすすめ」ではなく、今日はこの1本だけをそっと
            差し出すおみくじ形式。日付+選んだ5本をシードにしているので、
-           同じ日はページを開き直しても結果は変わらない。 -->
-      <div id="omikuji-card" class="omikuji-card" style="display:none;">
+           同じ日はページを開き直しても結果は変わらない。
+           本物のおみくじと同じく、開くのはユーザー自身のタップから
+           (表示された瞬間に結果を見せてしまわない)。 -->
+      <div id="omikuji-card" class="omikuji-card" style="display:none;" onclick="onOmikujiCardClick()">
         <div class="omikuji-label">今日の映画みくじ</div>
-        <div class="omikuji-body">
+        <div class="omikuji-closed" id="omikuji-closed">
+          <div class="omikuji-closed-text">タップして、今日の1本を引く</div>
+        </div>
+        <div class="omikuji-body" id="omikuji-body" style="display:none;">
           <div class="omikuji-poster" id="omikuji-poster"></div>
           <div class="omikuji-text">
             <div class="omikuji-title" id="omikuji-title"></div>
@@ -6502,10 +6510,23 @@ function pickOmikujiMovie(topTag, secondTag, excludeIds){
   return candidates[Math.floor(rand() * candidates.length)].id;
 }
 
+// 本物のおみくじと同じく、表示された瞬間に結果を見せず、タップして
+// 「引く」までは伏せておく。1回目のタップで開封、開封済みの状態で
+// もう一度タップしたら、その作品の詳細ページへ移動する。
+let omikujiPendingMovieId = null;
+let omikujiOpened = false;
+
 function renderOmikujiCard(movieId){
   const card = document.getElementById('omikuji-card');
   const m = movieId != null ? MOVIES.find(x => x.id === movieId) : null;
+  omikujiPendingMovieId = m ? m.id : null;
+  omikujiOpened = false;
   if(!m){ card.style.display = 'none'; return; }
+
+  document.getElementById('omikuji-closed').style.display = 'block';
+  const bodyEl = document.getElementById('omikuji-body');
+  bodyEl.style.display = 'none';
+  bodyEl.classList.remove('reveal');
 
   const posterEl = document.getElementById('omikuji-poster');
   posterEl.style.background = m.posterColor;
@@ -6513,8 +6534,20 @@ function renderOmikujiCard(movieId){
     ? `<img src="${m.posterUrl}" alt="" loading="lazy" decoding="async">`
     : escapeHtml(m.title.charAt(0));
   document.getElementById('omikuji-title').textContent = m.title;
-  card.onclick = () => goDetailWithViewReturn(m.id, 'view-pocket', '← 診断に戻る');
   card.style.display = 'block';
+}
+
+function onOmikujiCardClick(){
+  if(omikujiPendingMovieId == null) return;
+  if(!omikujiOpened){
+    omikujiOpened = true;
+    document.getElementById('omikuji-closed').style.display = 'none';
+    const bodyEl = document.getElementById('omikuji-body');
+    bodyEl.style.display = 'flex';
+    bodyEl.classList.add('reveal');
+    return;
+  }
+  goDetailWithViewReturn(omikujiPendingMovieId, 'view-pocket', '← 診断に戻る');
 }
 
 function pocketSnapshotIds(pocketMovies){
