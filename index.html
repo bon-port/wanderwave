@@ -5272,6 +5272,17 @@ function isVerifiedUser(){
   return !!(state.profile && state.profile.emailVerified);
 }
 
+// currentAuthUser()の確認が何秒経っても終わらない環境(一時的なハングではなく、
+// 何らかの理由で恒久的に失敗している場合)では、profileLoadedが永遠にtrueに
+// ならない。この猶予時間を過ぎてもまだなら「確認中」扱いをやめ、通常通り
+// 未登録として案内する側に倒す。でないと、本当に未登録のユーザーが新規登録/
+// ログイン画面に一生たどり着けなくなる(=「ログインリンクが動かない」に見える)。
+const appBootTime = Date.now();
+const PROFILE_CHECK_GRACE_MS = 10000;
+function stillAwaitingProfileCheck(){
+  return !state.profileLoaded && (Date.now() - appBootTime) < PROFILE_CHECK_GRACE_MS;
+}
+
 function requireVerifiedUser(){
   if(isVerifiedUser()) return true;
   // state.profileがnullなのが「本当に未登録」なのか「起動時のcurrentAuthUser()が
@@ -5279,8 +5290,8 @@ function requireVerifiedUser(){
   // 区別できない。区別せずここで「未登録」と決めつけてログイン画面に送ると、
   // 実際には登録済みのユーザーが使おうとするたびに締め出されて見える
   // (これまで繰り返し報告されていた「視聴記録が消える」の実体はこれだった)。
-  // 未確定の間はログイン画面へ送らず、裏で読み直すだけにする。
-  if(!state.profileLoaded){
+  // 未確定の間(起動直後の猶予時間内)はログイン画面へ送らず、裏で読み直すだけにする。
+  if(stillAwaitingProfileCheck()){
     showToast('登録状況を確認しています。数秒後にもう一度お試しください');
     loadProfile().then(() => updateHeader());
     return false;
@@ -5440,8 +5451,10 @@ function onProfileChipTap(){
   if(state.profile){ goProfile(); return; }
   // requireVerifiedUser()と同じ理由: profile未確定のままgoOnboarding()へ
   // 送ると、登録済みユーザーがタップするたびアカウントごと消えたように
-  // 見えてしまう。確定していなければ読み直してから振り分ける。
-  if(!state.profileLoaded){
+  // 見えてしまう。確定していなければ読み直してから振り分ける(ただし
+  // 猶予時間を過ぎたら通常判定に倒す。でないと本当に未登録のユーザーが
+  // 新規登録画面に一生たどり着けなくなる)。
+  if(stillAwaitingProfileCheck()){
     showToast('登録状況を確認しています。数秒後にもう一度お試しください');
     loadProfile().then(() => { updateHeader(); if(state.profile) goProfile(); });
     return;
