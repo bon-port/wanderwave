@@ -281,6 +281,47 @@
     font-size: 11.5px; color: var(--ink-soft);
     margin-top: 8px;
   }
+
+  .filter-disclosure-btn{
+    width:100%;
+    display:flex; align-items:center; justify-content:space-between;
+    background:none; border:1px dashed var(--line);
+    border-radius:14px; padding:12px 16px; margin-top: 12px;
+    color:var(--ink-soft); font-size:13.5px;
+    cursor:pointer; font-family:inherit;
+  }
+  .filter-disclosure-chev{ transition:transform .2s ease; color: var(--ink-soft); display:inline-block; }
+  .filter-disclosure-btn.open .filter-disclosure-chev{ transform:rotate(180deg); }
+  .filter-disclosure-body{
+    max-height:0; overflow:hidden; transition:max-height .25s ease;
+  }
+  .filter-disclosure-body.open{ max-height:400px; }
+  .filter-disclosure-inner{ padding-top:14px; }
+  .filter-group{ margin-bottom:16px; }
+  .filter-group:last-child{ margin-bottom:0; }
+  .filter-group-label{ font-size:12px; color: var(--ink-soft); margin:0 0 8px; letter-spacing:.03em; }
+  .genre-cloud, .country-cloud{ display:flex; flex-wrap:wrap; gap:8px; }
+  .genre-chip, .country-chip{
+    border:1px solid var(--line);
+    background: transparent;
+    padding: 6px 13px;
+    border-radius: 999px;
+    font-size: 13px;
+    color: var(--ink-soft);
+    cursor:pointer;
+    transition: all .18s ease;
+  }
+  .genre-chip.active{
+    border-color: var(--ink-soft);
+    color: var(--ink);
+    background: var(--surface);
+  }
+  .country-chip.active{
+    border-color: var(--plum-deep);
+    color: var(--plum-deep);
+    background: rgba(227, 182, 204, .14);
+  }
+
   .tagchip{
     border:1px solid var(--line);
     background: var(--surface);
@@ -2010,6 +2051,23 @@
                oninput="onIntensityFilterInput(this.value)">
         <div class="intensity-filter-caption" id="intensity-filter-caption">こだわらず全ての作品を表示します</div>
       </div>
+
+      <button class="filter-disclosure-btn" id="filter-disclosure-btn" onclick="toggleFilterDisclosure()">
+        <span>詳しく絞り込む(ジャンル・国)</span>
+        <span class="filter-disclosure-chev">⌄</span>
+      </button>
+      <div class="filter-disclosure-body" id="filter-disclosure-body">
+        <div class="filter-disclosure-inner">
+          <div class="filter-group">
+            <div class="filter-group-label">ジャンル</div>
+            <div class="genre-cloud" id="genre-cloud"></div>
+          </div>
+          <div class="filter-group">
+            <div class="filter-group-label">国</div>
+            <div class="country-cloud" id="country-cloud"></div>
+          </div>
+        </div>
+      </div>
     </div>
 
     <div class="search-results-grid" id="results"></div>
@@ -3197,6 +3255,11 @@ const TAG_COLORS = {
   "考えさせられる": "#9b8bb4"
 };
 
+// 「詳しく絞り込む」に出すジャンル・国の候補。moviesテーブル全体を集計した際に
+// 件数の多い主要なものだけに絞ってあり、表記ゆれ的な少数派(「犯罪」「伝記」等)は含めない。
+const FILTER_GENRES = ["ドラマ","コメディ","アクション","スリラー","アドベンチャー","クライム","恋愛","ホラー","SF","ファンタジー","ミステリー","アニメーション","ファミリー","歴史","戦争","音楽"];
+const FILTER_COUNTRIES = ["アメリカ","イギリス","フランス","ドイツ","日本","カナダ","イタリア","スペイン","中国","香港","韓国","インド","オーストラリア"];
+
 function tagColor(tag){
   return TAG_COLORS[tag] || "#9a958f";
 }
@@ -3392,7 +3455,7 @@ function reasonPercentages(m){
   };
 }
 
-let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myReviewRowsLoaded: false, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, profileLoaded: false, myLogs: [], myLogsLoaded: false, mySubmittedMovieIds: [], mySubmittedMovies: [], mySubmittedMoviesLoaded: false, lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [] };
+let state = { query: "", activeTags: new Set(), currentMovieId: null, hasReviewed: {}, myReviewsById: {}, myReviewRows: [], myReviewRowsLoaded: false, myLove: {}, myIntensity: {}, myReason: {}, myTagVotes: {}, myWatchLater: {}, myPocket: [], myLists: [], currentListId: null, profile: null, profileLoaded: false, myLogs: [], myLogsLoaded: false, mySubmittedMovieIds: [], mySubmittedMovies: [], mySubmittedMoviesLoaded: false, lastSubmissionDate: null, todaySubmissionCount: 0, intensityFilter: 0, diagnosisHistory: [], activeGenres: new Set(), activeCountries: new Set() };
 
 
 function riskLabel(v){
@@ -3458,6 +3521,51 @@ function renderTagCloud(){
     state.intensityFilter = 0;
     document.getElementById('intensity-filter-slider').value = 0;
   }
+}
+
+// ジャンル・国は感情タグと違い「作品を分類するための客観的な属性」なので、
+// 感情タグほど目立たせず「詳しく絞り込む」の折りたたみの中に控えめに置く。
+// 選択は「いずれかに一致すればOK」(OR)。感情タグの「全て一致」(AND)とは
+// 意味合いが違う(1本の映画が複数の国・ジャンルを持つのは普通なため)。
+function renderGenreCloud(){
+  const el = document.getElementById('genre-cloud');
+  el.innerHTML = "";
+  FILTER_GENRES.forEach(genre => {
+    const chip = document.createElement('div');
+    const isActive = state.activeGenres.has(genre);
+    chip.className = 'genre-chip' + (isActive ? ' active' : '');
+    chip.textContent = genre;
+    chip.onclick = () => {
+      if(state.activeGenres.has(genre)) state.activeGenres.delete(genre);
+      else state.activeGenres.add(genre);
+      renderGenreCloud();
+      renderResults();
+    };
+    el.appendChild(chip);
+  });
+}
+
+function renderCountryCloud(){
+  const el = document.getElementById('country-cloud');
+  el.innerHTML = "";
+  FILTER_COUNTRIES.forEach(country => {
+    const chip = document.createElement('div');
+    const isActive = state.activeCountries.has(country);
+    chip.className = 'country-chip' + (isActive ? ' active' : '');
+    chip.textContent = country;
+    chip.onclick = () => {
+      if(state.activeCountries.has(country)) state.activeCountries.delete(country);
+      else state.activeCountries.add(country);
+      renderCountryCloud();
+      renderResults();
+    };
+    el.appendChild(chip);
+  });
+}
+
+function toggleFilterDisclosure(){
+  document.getElementById('filter-disclosure-btn').classList.toggle('open');
+  document.getElementById('filter-disclosure-body').classList.toggle('open');
 }
 
 // 表現度は元々「この値以下は全部表示」という上限方式だったが、それだと
@@ -4016,7 +4124,8 @@ function renderResults(){
   const root = document.getElementById('results');
   const homeRowsEl = document.getElementById('home-rows');
 
-  const isActiveSearch = state.query.trim() !== "" || state.activeTags.size > 0;
+  const isActiveSearch = state.query.trim() !== "" || state.activeTags.size > 0
+    || state.activeGenres.size > 0 || state.activeCountries.size > 0;
 
   if(!isActiveSearch){
     // 検索・タグ選択をしてない間は、おすすめの棚だけを見せる
@@ -4047,7 +4156,13 @@ function renderResults(){
     // スルーしてしまい、タグなしの文字検索では一切効かないバグがあった)。
     // 0(こだわらない)なら全件通す。それ以外はそのバンドの作品だけを通す。
     const matchIntensity = state.intensityFilter === 0 || movieIntensityBand(m) === state.intensityFilter;
-    return matchQuery && matchTags && matchIntensity && !matchesExcludedWord(m);
+    // ジャンル・国は「いずれか一致でOK」(OR)。1本の映画が複数のジャンル・
+    // 制作国を持つのは普通なので、感情タグの「全て一致」(AND)とは別の扱い。
+    const matchGenre = state.activeGenres.size === 0
+      || (m.genre && m.genre.some(g => state.activeGenres.has(g)));
+    const matchCountry = state.activeCountries.size === 0
+      || (m.country && [...state.activeCountries].some(c => m.country.includes(c)));
+    return matchQuery && matchTags && matchIntensity && matchGenre && matchCountry && !matchesExcludedWord(m);
   });
 
   // 検索条件が変わるたびに最初のRESULTS_PAGE_SIZE件から表示し直す
@@ -7645,6 +7760,8 @@ async function init(){
   await Promise.all([signInPromise, loadMovies(), loadMyReviews(), loadMyTagVotes(), loadMyWatchLater(), loadMyPocket(), loadMyLists(), loadProfile(), loadMyLogs(), loadMySubmittedMovies(), loadLastSubmissionDate(), loadDiagnosisHistory(), loadRecentReviews()]);
 
   renderTagCloud();
+  renderGenreCloud();
+  renderCountryCloud();
   renderResults();
   renderFormTags();
   renderFormPlatforms();
