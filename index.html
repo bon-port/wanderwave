@@ -4131,6 +4131,20 @@ const VIBE_QUERY_ALIASES = {
   "dream": ["夢"],
   "parallel universe": ["パラレルワールド"],
   "haunted house": ["幽霊屋敷"],
+
+  // 過激な表現を積極的に求める人も静かに迎えたい、という方針での追加。
+  // 表には専用のタグや棚を出さず、検索した人にだけそっと結果が返る形にする
+  // (他のvibeエイリアスと全く同じ仕組みの延長)。
+  "gore": ["グロ", "グロい", "グロテスク"],
+  "splatter": ["スプラッター"],
+  "slasher": ["スラッシャー", "殺人鬼もの"],
+  "torture": ["拷問"],
+  "cannibal": ["カニバル", "人食い", "人肉"],
+  "body horror": ["ボディホラー", "身体損壊"],
+  "serial killer": ["猟奇殺人", "連続殺人鬼", "シリアルキラー"],
+  "mutilation": ["身体切断"],
+  "grindhouse": ["グラインドハウス"],
+  "gruesome": ["凄惨"],
 };
 
 function matchesVibeAlias(m, normalizedQuery){
@@ -4187,6 +4201,10 @@ function renderResults(){
       || (m.country && normalizeForSearch(m.country).includes(q))
       || (m.genre && m.genre.some(g => normalizeForSearch(g).includes(q)))
       || (m.synopsis && normalizeForSearch(m.synopsis).includes(q))
+      // TMDbのキーワード(英語)をそのまま検索対象にする。日本語の言い方は
+      // 上のVIBE_QUERY_ALIASESで別途対応するが、"gore"や"heist"のように
+      // 英単語のまま探す人にもそのまま応えられるようにしておく。
+      || (m.keywords && m.keywords.some(k => normalizeForSearch(k).includes(q)))
       || matchesCountryAlias(m, q)
       || matchesVibeAlias(m, q);
     const matchTags = state.activeTags.size === 0 || [...state.activeTags].every(t => m.tags.includes(t));
