@@ -196,6 +196,15 @@
   }
   .featured-love .heart-icon{ width: 13px; height: 12px; color: var(--love); }
 
+  /* 今はまだ評価がついていない作品も多く、ホーム画面のハート表示が寂しく/
+     不揃いに見えるため、当面ホーム画面だけハートを非表示にする。データが
+     十分に集まってきたら、このブロックごと削除すれば元に戻る。 */
+  #featured-love-text,
+  #home-rows .interest-row,
+  #home-rows .interest-count{
+    display: none;
+  }
+
   .featured-dots{
     position:absolute; bottom: 10px; right: 14px; z-index: 3;
     display:flex; gap:5px;
