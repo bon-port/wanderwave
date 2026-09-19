@@ -943,6 +943,7 @@
     margin: 26px 0 10px;
   }
   .section-label-row .section-label{ margin: 0; }
+  .review-count-badge{ font-size: 12px; color: var(--ink-soft); }
   .info-icon{
     background:none; border: 1px solid var(--line);
     border-radius: 50%; width: 18px; height:18px;
@@ -2052,6 +2053,10 @@
     <div class="section-label" id="d-watch-label" style="display:none;">ここで観る</div>
     <div class="watch-links" id="d-watch-links"></div>
 
+    <div class="section-label-row">
+      <div class="section-label">レビュー</div>
+      <span class="review-count-badge" id="d-reviews-count"></span>
+    </div>
     <div id="d-reviews"></div>
     <div class="results-pagination" id="reviews-pagination" style="display:none;">
       <button class="ghost-btn results-pagination-btn" id="reviews-page-prev" onclick="goToReviewsPage(-1)">‹ 前へ</button>
@@ -2061,7 +2066,7 @@
 
     <!-- Wander本体のレビューとは別物とわかるよう、控えめなトーンで分けて表示する -->
     <div id="tmdb-reviews-section" style="display:none;">
-      <div class="tmdb-reviews-label">TMDBの声(海外レビュー・日本語訳)</div>
+      <div class="tmdb-reviews-label" id="tmdb-reviews-label">TMDBの声(海外レビュー・日本語訳)</div>
       <div class="tmdb-review-marquee" id="tmdb-review-marquee">
         <div class="tmdb-review-track" id="tmdb-review-track"></div>
       </div>
@@ -4628,15 +4633,11 @@ async function goDetail(id){
 // movies.tmdb_idに書き戻すので、2回目以降のこの作品の表示では検索なしですぐ返る)。
 // 「みんなの声」と同じ、自動で流れるマーキー形式で並べて見せる。
 let tmdbReviews = [];
-// この映画にTMDBレビューがあるかどうか。d-reviews側の「まだレビューがありません」
-// の文面を、その情報が分かってから(=非同期で少し遅れて)出し分けるために使う。
-let tmdbReviewsAvailableForCurrentMovie = false;
 
 async function loadTmdbReviews(movieId){
   const section = document.getElementById('tmdb-reviews-section');
   section.style.display = 'none';
   tmdbReviews = [];
-  tmdbReviewsAvailableForCurrentMovie = false;
   try{
     const { data, error } = await supabase.functions.invoke('tmdb-movie-reviews', {
       body: { movie_id: movieId }
@@ -4647,20 +4648,15 @@ async function loadTmdbReviews(movieId){
     if(error || !data || !data.reviews || !data.reviews.length) return;
 
     tmdbReviews = data.reviews;
-    tmdbReviewsAvailableForCurrentMovie = true;
     renderTmdbReviewMarquee();
     section.style.display = 'block';
-
-    // d-reviews側が先に「まだレビューがありません」を出し終えている場合、
-    // TMDBに声があることが後から分かった時点で文面を更新する。
-    const emptyEl = document.getElementById('d-reviews-empty');
-    if(emptyEl) emptyEl.textContent = reviewsEmptyMessage();
   }catch(err){
     console.error('TMDBレビューの取得に失敗しました', err);
   }
 }
 
 function renderTmdbReviewMarquee(){
+  document.getElementById('tmdb-reviews-label').textContent = `TMDBの声(海外レビュー・日本語訳)(${tmdbReviews.length}件)`;
   const track = document.getElementById('tmdb-review-track');
   const cardsHtml = tmdbReviews.map(r => `
     <div class="tmdb-review-card">
@@ -4747,17 +4743,10 @@ async function loadMovieReviews(m){
   }
 }
 
-// Wander本体のレビューが0件でも、下にTMDBの声があるなら「まだレビューが
-// ありません」だけでは食い違って見える(実際には声がすぐ下にあるため)。
-// TMDBレビューの有無が分かっているかどうかで文面を出し分ける。
-function reviewsEmptyMessage(){
-  return tmdbReviewsAvailableForCurrentMovie
-    ? 'Wanderでのレビューはまだありません。下にTMDBの海外の声があるので覗きつつ、最初のひとことも書いてみませんか。'
-    : 'まだレビューがありません。最初のひとことを書いてみませんか。';
-}
-
 // レビューが増えすぎると1画面がどこまでも長くなってしまうので、検索結果と
 // 同じくページ単位で区切る(件数が少ない間はページ送りUI自体を出さない)。
+// 0件の時は「まだレビューがありません」のような空メッセージは出さず、
+// 見出し横の件数バッジも空にするだけにする(何もないことは自明なため)。
 function renderVisibleReviews(){
   const reviewsEl = document.getElementById('d-reviews');
   const totalPages = Math.max(1, Math.ceil(reviewsList.length / REVIEWS_PAGE_SIZE));
@@ -4766,14 +4755,14 @@ function renderVisibleReviews(){
   const start = reviewsPage * REVIEWS_PAGE_SIZE;
   const visible = reviewsList.slice(start, start + REVIEWS_PAGE_SIZE);
 
-  reviewsEl.innerHTML = visible.length
-    ? visible.map(r => `
-        <div class="review-card">
-          <div class="r-name">${escapeHtml((r.profiles && r.profiles.user_name) || 'ゲスト')}</div>
-          <div class="r-body">${escapeHtml(r.review_text)}</div>
-        </div>
-      `).join('')
-    : `<div class="empty" id="d-reviews-empty" style="padding:16px 0;">${reviewsEmptyMessage()}</div>`;
+  reviewsEl.innerHTML = visible.map(r => `
+    <div class="review-card">
+      <div class="r-name">${escapeHtml((r.profiles && r.profiles.user_name) || 'ゲスト')}</div>
+      <div class="r-body">${escapeHtml(r.review_text)}</div>
+    </div>
+  `).join('');
+
+  document.getElementById('d-reviews-count').textContent = reviewsList.length > 0 ? `${reviewsList.length}件` : '';
 
   const pagination = document.getElementById('reviews-pagination');
   if(reviewsList.length <= REVIEWS_PAGE_SIZE){
@@ -6332,25 +6321,35 @@ async function loadMyPocket(){
 // 「自分だけの結果」に感じられるようにする。冷たい分析用語(データ・構造・
 // 分析・傾向・パターンなど)は使わず、「〜かもしれません」「〜のようですね」と
 // 余白を残す言い回しにする。
-// 1つのタグに対して複数の名前を持たせ、診断のたびにランダムに1つを選ぶ。
-// 同じタグの人が全員同じ名前になってしまうと「みんな同じ」に見えてしまうため。
-const THEME_NAME_VARIANTS = {
+// 名前を固定の一覧から選ぶのではなく、「修飾語」×「タグごとの役割」を
+// 掛け合わせてその場で組み立てる。修飾語は特定のタグに縛られない汎用の
+// 気質語(誰にでも当てはまりうる、バーナム効果的なもの)で、役割はタグごとに
+// 複数用意しておく。10種の修飾語×タグごと4種の役割=40通りを1タグあたりの
+// 組み合わせとして生成できるので、「毎回同じ名前」になりにくい。
+const THEME_NAME_MODIFIERS = [
+  "静かな", "情熱的な", "自由な", "繊細な", "大胆な",
+  "穏やかな", "好奇心旺盛な", "一途な", "軽やかな", "芯のある"
+];
+
+const THEME_NAME_ROLES = {
   "楽しい":         ["陽だまりの中の冒険者", "小さな喜びを集める採集者", "笑顔の種をまく人", "毎日に光をともす者"],
-  "感動":           ["涙のあとに咲く花", "心の震えを大切にする人", "誰かの物語に涙する人", "静かに胸を熱くする者"],
+  "感動":           ["涙のあとに咲く花", "心の震えを大切にする人", "誰かの物語に涙する人", "胸を熱くする者"],
   "リラックス":     ["凪いだ心の航海士", "風にまかせて漂う人", "静寂を味方につける人", "深呼吸を知る旅人"],
   "ワクワク":       ["好奇心という名の羅針盤", "未知への扉を開く人", "胸躍る瞬間を追う者", "冒険心を燃やす探求者"],
   "怖い":           ["闇を恐れず歩む探検家", "恐れごと抱きしめる者", "闇にひそむ美を見つける人", "スリルを友とする挑戦者"],
-  "美しい":         ["静かな美意識の錬金術師", "光と影を愛でる人", "美の欠片を拾い集める者", "静謐な世界に生きる人"],
+  "美しい":         ["美意識の錬金術師", "光と影を愛でる人", "美の欠片を拾い集める者", "静謐な世界に生きる人"],
   "ドキドキ":       ["鼓動が導く道しるべ", "胸の高鳴りを信じる人", "スリルの中に生きる者", "高揚感を追いかける旅人"],
-  "笑い":           ["軽やかな魂の旅人", "日常にユーモアを見出す人", "笑いで世界を軽くする者", "陽気な風を運ぶ人"],
-  "悲しい":         ["優しい涙を知る者", "涙の中に強さを見る人", "痛みを美しさに変える者", "静かな悲しみに寄り添う人"],
-  "考えさせられる": ["問いを抱いて歩む賢者", "答えのない問いを愛する人", "物語の奥を見つめる者", "静かに思索を巡らす人"]
+  "笑い":           ["魂の旅人", "日常にユーモアを見出す人", "笑いで世界を軽くする者", "陽気な風を運ぶ人"],
+  "悲しい":         ["涙を知る者", "涙の中に強さを見る人", "痛みを美しさに変える者", "悲しみに寄り添う人"],
+  "考えさせられる": ["問いを抱いて歩む賢者", "答えのない問いを愛する人", "物語の奥を見つめる者", "思索を巡らす人"]
 };
 
 function pickThemeName(topTag){
-  const variants = THEME_NAME_VARIANTS[topTag];
-  if(!variants || !variants.length) return "まだ名前のない物語";
-  return variants[Math.floor(Math.random() * variants.length)];
+  const roles = THEME_NAME_ROLES[topTag];
+  if(!roles || !roles.length) return "まだ名前のない物語";
+  const modifier = THEME_NAME_MODIFIERS[Math.floor(Math.random() * THEME_NAME_MODIFIERS.length)];
+  const role = roles[Math.floor(Math.random() * roles.length)];
+  return `${modifier}${role}`;
 }
 
 // 誰にでも当てはまりうる、両価的(バーナム効果)な感性の強み。
@@ -7062,7 +7061,7 @@ function renderPocketView(){
   const visiblePocket = sortedPocket.slice(0, pocketShownCount);
 
   const itemsRoot = document.getElementById('pocket-items');
-  renderMovieCards(itemsRoot, visiblePocket, 'ポケットの中はまだ空っぽです。気になる映画を波打ち際に置いていくように、追加してみてください。', { overlayTitle: true });
+  renderMovieCards(itemsRoot, visiblePocket, 'ポケットの中はまだ空っぽです。', { overlayTitle: true });
 
   const moreBtn = document.getElementById('pocket-expand-btn');
   const remaining = sortedPocket.length - pocketShownCount;
@@ -7177,7 +7176,7 @@ function toggleDiagnosisPick(id){
 }
 
 // 診断の「シネマ・タイプ」カード。ランクや段階の概念を一切持たず、10個の
-// 感情タグの色×二つ名(THEME_NAME_VARIANTS、タグごとに複数持たせてある)を使う(占い・性格診断寄りの
+// 感情タグの色×自動生成した二つ名(pickThemeName、修飾語×役割の組み合わせ)を使う(占い・性格診断寄りの
 // 水平な分類。優劣は無い)。同じ関数を、新しく出た結果にも過去の記録にも使う。
 let currentDiagnosisShareState = null;
 
