@@ -1832,8 +1832,9 @@
     display:flex; align-items:center; gap: 6px;
   }
   .diagnosis-share-btn:active{ transform: scale(0.97); }
-  /* 今日の映画みくじ。一覧で選ばせる「おすすめ」カード列ではなく、
-     静かに1本だけ差し出す紙のおみくじのような見た目にする(左端に細い
+  /* 今日の贈り物(UI名称)。内部のクラス/関数名は開発時の名残でomikuji-のまま
+     だが、表示上は「今日の贈り物」。一覧で選ばせる「おすすめ」カード列ではなく、
+     静かに1本だけ差し出すカードのような見た目にする(左端に細い
      アクセント線、派手なアニメーションやバッジは付けない)。 */
   .omikuji-card{
     margin-top: 16px;
@@ -2411,9 +2412,9 @@
            本物のおみくじと同じく、開くのはユーザー自身のタップから
            (表示された瞬間に結果を見せてしまわない)。 -->
       <div id="omikuji-card" class="omikuji-card" style="display:none;" onclick="onOmikujiCardClick()">
-        <div class="omikuji-label">今日の映画みくじ</div>
+        <div class="omikuji-label">今日の贈り物</div>
         <div class="omikuji-closed" id="omikuji-closed">
-          <div class="omikuji-closed-text">タップして、今日の1本を引く</div>
+          <div class="omikuji-closed-text">タップして、今日の贈り物を開ける</div>
         </div>
         <div class="omikuji-body" id="omikuji-body" style="display:none;">
           <div class="omikuji-poster" id="omikuji-poster"></div>
@@ -6496,7 +6497,7 @@ function generateDiagnosis(pocketMovies){
 
   const body = [cardSection, senseSection, oracleSection].join('\n\n');
 
-  // 今日の映画みくじ(選んでいない、傾向が近い作品から1本だけ)
+  // 今日の贈り物(選んでいない、傾向が近い作品から1本だけ)
   const pickedIds = pocketMovies.map(m => m.id);
   const omikujiMovieId = pickOmikujiMovie(topTag, secondTag, pickedIds);
 
